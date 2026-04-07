@@ -41,6 +41,7 @@ def pack_cmd(
         False, "--dry-run", help="Print what would be done, don't execute"
     ),
     only: str | None = typer.Option(None, "--only", help="Comma-separated list of plugins to run"),
+    format: str = typer.Option("dir", "--format", help="Output format: dir, tar.gz, zip"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ) -> None:
     """Download and resolve all dependencies into a self-contained bundle directory."""
@@ -67,7 +68,15 @@ def pack_cmd(
 
     # Create bundle directory
     dir_name = bundle_dir_name(name, version)
-    bundle_dir = (output / dir_name).resolve()
+    import tempfile
+
+    if format != "dir" and not dry_run:
+        tmp_dir_path = Path(tempfile.mkdtemp(prefix="offlinectl-pack-"))
+        bundle_dir = tmp_dir_path / dir_name
+    else:
+        tmp_dir_path = None
+        bundle_dir = (output / dir_name).resolve()
+
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy manifest into bundle
@@ -146,9 +155,26 @@ def pack_cmd(
             tasks=task_metas,
         )
         write_meta(bundle_dir, meta)
-        console.print(f"\n[bold green]Bundle ready:[/] {bundle_dir}")
+
+        if format != "dir":
+            from offlinectl.bundle.archive import pack_archive
+
+            archive_target = (output / dir_name).resolve()
+            archive_target.parent.mkdir(parents=True, exist_ok=True)
+            final_path = pack_archive(bundle_dir, archive_target, format)
+            if tmp_dir_path:
+                shutil.rmtree(tmp_dir_path, ignore_errors=True)
+            console.print(f"\n[bold green]Archive ready:[/] {final_path}")
+        else:
+            console.print(f"\n[bold green]Bundle ready:[/] {bundle_dir}")
     else:
-        console.print(f"\n[dim]Would write bundle to:[/dim] {bundle_dir}")
+        out_msg = str(output / dir_name)
+        if format != "dir":
+            ext = ".zip" if format == "zip" else ".tar.gz"
+            out_msg += ext
+        console.print(f"\n[dim]Would write bundle to:[/dim] {out_msg}")
 
     if not overall_ok:
+        if tmp_dir_path:
+            shutil.rmtree(tmp_dir_path, ignore_errors=True)
         raise typer.Exit(1)

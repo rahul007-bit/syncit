@@ -6,8 +6,10 @@ import typer
 from rich.console import Console
 
 from offlinectl.commands.apply import apply_cmd
+from offlinectl.commands.apply_remote import apply_remote_cmd
 from offlinectl.commands.diff import diff_cmd
 from offlinectl.commands.pack import pack_cmd
+from offlinectl.commands.transfer import transfer_cmd
 from offlinectl.commands.validate import validate_cmd
 
 __version__ = "0.1.0"
@@ -47,6 +49,10 @@ app.command("validate", help="Validate a bundle.yaml manifest file.")(validate_c
 app.command("pack", help="Download and bundle all dependencies (run on online VM).")(pack_cmd)
 app.command("apply", help="Apply a bundle onto this machine (run on offline VM).")(apply_cmd)
 app.command("diff", help="Compare two bundle versions and show what changed.")(diff_cmd)
+app.command("transfer", help="Transfer a bundle to offline VMs via SCP.")(transfer_cmd)
+app.command("apply-remote", help="Run `offlinectl apply` on targeted remote VMs via SSH.")(
+    apply_remote_cmd
+)
 
 
 if __name__ == "__main__":

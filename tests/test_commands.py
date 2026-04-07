@@ -206,3 +206,124 @@ def test_diff_unknown_plugin(fixture_dir: Path, tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["diff", str(b1), str(b2)])
     assert result.exit_code == 0
+
+
+def test_pack_archive_format(bundle_yaml: Path, tmp_path: Path) -> None:
+    out_dir = tmp_path / "bundles"
+
+    with patch("offlinectl.plugins.apt.AptPlugin.pack") as mock_pack:
+        from offlinectl.plugins.base import PluginResult
+
+        mock_pack.return_value = PluginResult(
+            success=True, message="mocked", artifacts=[], errors=[]
+        )
+        with patch("offlinectl.plugins.apt.AptPlugin.validate", return_value=[]):
+            result = runner.invoke(
+                app,
+                [
+                    "pack",
+                    str(bundle_yaml),
+                    "--output",
+                    str(out_dir),
+                    "--format",
+                    "tar.gz",
+                    "--only",
+                    "apt",
+                ],
+            )
+    assert result.exit_code == 0
+    assert "Archive ready:" in result.stdout
+    # Test if it produced the file
+    archives = list(out_dir.glob("*.tar.gz"))
+    assert len(archives) == 1
+
+
+def test_apply_archive_format(fixture_dir: Path, tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    _setup_mock_bundle(bundle_dir, fixture_dir.joinpath("bundle.yaml").read_text())
+
+    # Now let's compress it to tar.gz manually so we can test apply detecting it
+    from offlinectl.bundle.archive import pack_archive
+
+    archive_path = pack_archive(bundle_dir, tmp_path / "test-archive", "tar.gz")
+
+    with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="docker"):
+        result = runner.invoke(app, ["apply", str(archive_path), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "dry-run mode" in result.stdout
+
+
+def test_transfer_command_single_host(tmp_path: Path) -> None:
+
+    inv_file = tmp_path / "inv.yaml"
+    inv_file.write_text("hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n    bundle_dest: /opt")
+    bundle = tmp_path / "b.tar.gz"
+    bundle.touch()
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        with patch("shutil.which", return_value="scp"):
+            result = runner.invoke(app, ["transfer", str(bundle), "-i", str(inv_file), "-t", "h1"])
+
+    assert result.exit_code == 0
+    mock_run.assert_called_once()
+    args = mock_run.call_args[0][0]
+    assert args[0] == "scp"
+    assert args[-2] == str(bundle)
+    assert args[-1] == "root@10.0.0.1:/opt"
+    assert "-i" not in args
+
+
+def test_transfer_command_with_ssh_key_and_group(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    inv_file = tmp_path / "inv.yaml"
+    inv_file.write_text(
+        "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n    ssh_key: /tmp/key\n    bundle_dest: /opt\n  h2:\n    host: 10.0.0.2\n    user: r2\n    bundle_dest: /opt2\ngroups:\n  all: [h1, h2]"
+    )
+    bundle = tmp_path / "b.tar.gz"
+    bundle.touch()
+
+    with patch("subprocess.run") as mock_run:
+        # First call succeeds, second fails
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stderr="", stdout=""),
+            MagicMock(returncode=1, stderr="fail", stdout=""),
+        ]
+        with patch("shutil.which", return_value="scp"):
+            result = runner.invoke(app, ["transfer", str(bundle), "-i", str(inv_file), "-t", "all"])
+
+    assert result.exit_code == 1
+    assert mock_run.call_count == 2
+    args_h1 = mock_run.call_args_list[0][0][0]
+    assert "-i" in args_h1
+    assert "/tmp/key" in args_h1
+    assert args_h1[-1] == "root@10.0.0.1:/opt"
+
+    args_h2 = mock_run.call_args_list[1][0][0]
+    assert "-i" not in args_h2
+    assert args_h2[-1] == "r2@10.0.0.2:/opt2"
+
+
+def test_apply_remote_command(tmp_path: Path) -> None:
+    inv_file = tmp_path / "inv.yaml"
+    inv_file.write_text(
+        "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n    state_file: /s.json\n    bundle_dest: /opt"
+    )
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "Applied successfully"
+        mock_run.return_value.stderr = ""
+        with patch("shutil.which", return_value="ssh"):
+            result = runner.invoke(
+                app, ["apply-remote", "--bundle", "b.tar.gz", "-i", str(inv_file), "-t", "h1"]
+            )
+
+    assert result.exit_code == 0
+    mock_run.assert_called_once()
+    args = mock_run.call_args[0][0]
+    assert args[0] == "ssh"
+    assert args[1] == "root@10.0.0.1"
+    assert args[2] == "offlinectl apply /opt/b.tar.gz --state-file /s.json"

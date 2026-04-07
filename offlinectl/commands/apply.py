@@ -25,7 +25,7 @@ err_console = Console(stderr=True)
 
 
 def apply_cmd(
-    bundle_dir: Path = typer.Argument(..., help="Path to the bundle directory"),
+    bundle_dir: Path = typer.Argument(..., help="Path to bundle directory or archive"),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be applied, don't execute"
     ),
@@ -41,8 +41,30 @@ def apply_cmd(
     bundle_dir = bundle_dir.resolve()
 
     if not bundle_dir.exists():
-        err_console.print(f"[bold red]ERROR:[/] Bundle directory not found: {bundle_dir}")
+        err_console.print(f"[bold red]ERROR:[/] Bundle path not found: {bundle_dir}")
         raise typer.Exit(1)
+
+    from offlinectl.bundle.archive import detect_bundle
+
+    try:
+        with detect_bundle(bundle_dir) as actual_bundle_dir:
+            _run_apply(
+                actual_bundle_dir, dry_run, force, only, state_file, continue_on_error, verbose
+            )
+    except ValueError as e:
+        err_console.print(f"[bold red]ERROR:[/] {e}")
+        raise typer.Exit(1)
+
+
+def _run_apply(
+    bundle_dir: Path,
+    dry_run: bool,
+    force: bool,
+    only: str | None,
+    state_file: Path,
+    continue_on_error: bool,
+    verbose: bool,
+) -> None:
 
     # Load bundle metadata
     try:

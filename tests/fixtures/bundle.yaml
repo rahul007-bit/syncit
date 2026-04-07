@@ -1,0 +1,29 @@
+apiVersion: offlinectl/v1
+kind: Bundle
+metadata:
+  name: test-env
+  version: "1.0.0"
+  description: "Test environment"
+  author: "tester"
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+  tasks:
+    - name: Install base packages
+      plugin: apt
+      packages:
+        - git
+        - curl
+
+    - name: Install Pip Deps
+      plugin: pip
+      python_version: "3.11"
+      requirements: ./requirements.txt
+
+    - name: Sync Images
+      plugin: oci_image
+      images:
+        - source: alpine:latest
+        - source: docker.io/library/redis:7-alpine

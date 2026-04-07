@@ -1,0 +1,36 @@
+apiVersion: offlinectl/v1
+kind: Bundle
+metadata:
+  name: backend-dev-env
+  version: "2025.04.0"
+  description: "Python backend + container images for payments service"
+  author: "team-platform"
+
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble          # 24.04
+    arch: amd64
+
+  tasks:
+    - name: Install base OS packages
+      plugin: apt
+      packages:
+        - build-essential
+        - git
+        - curl
+        - python3.12
+        - python3.12-venv
+        - python3-pip
+
+    - name: Install Python dependencies
+      plugin: pip
+      python_version: "3.12"
+      requirements: ./requirements.txt
+
+    - name: Sync container images
+      plugin: oci_image
+      images:
+        - source: ghcr.io/org/payments-service:2.1.0
+        - source: docker.io/library/postgres:16-alpine
+        - source: docker.io/library/redis:7-alpine

@@ -1,0 +1,213 @@
+"""pip plugin — downloads Python wheels and installs them offline."""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from offlinectl.plugins.base import (
+    ApplyContext,
+    DiffResult,
+    OfflinePlugin,
+    PackContext,
+    PluginResult,
+)
+from offlinectl.plugins.registry import registry
+
+
+def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+
+
+class PipPlugin(OfflinePlugin):
+    name = "pip"
+
+    def validate(self, task_spec: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        if "requirements" not in task_spec and "pyproject" not in task_spec:
+            errors.append("[pip] Task spec must contain either 'requirements' or 'pyproject' path")
+        for field in ("requirements", "pyproject", "python_version"):
+            if field in task_spec and not isinstance(task_spec[field], str):
+                errors.append(f"[pip] Field '{field}' must be a string")
+        return errors
+
+    def pack(self, task_spec: dict[str, Any], ctx: PackContext) -> PluginResult:
+        # Resolve the requirements file (relative to manifest dir)
+        req_path: Path | None = None
+        if "requirements" in task_spec:
+            req_path = (ctx.manifest_dir / task_spec["requirements"]).resolve()
+        elif "pyproject" in task_spec:
+            return PluginResult(
+                success=False,
+                message="[pip] pyproject.toml support is planned for Phase 2",
+                artifacts=[],
+                errors=["Only requirements.txt is supported in Phase 1"],
+            )
+
+        python_version = task_spec.get("python_version", "3.11")
+        wheel_dir = ctx.bundle_dir / "pip" / "wheels"
+
+        if ctx.dry_run:
+            return PluginResult(
+                success=True,
+                message=(
+                    f"[dry-run] Would run: pip download -r {req_path} "
+                    f"--python-version {python_version} --only-binary=:all: --dest {wheel_dir}"
+                ),
+                artifacts=[],
+                errors=[],
+            )
+
+        if not req_path or not req_path.exists():
+            return PluginResult(
+                success=False,
+                message=f"[pip] Requirements file not found: {req_path}",
+                artifacts=[],
+                errors=[f"File not found: {req_path}"],
+            )
+
+        wheel_dir.mkdir(parents=True, exist_ok=True)
+
+        # First attempt: binary-only (preferred for air-gap compatibility)
+        cmd = [
+            "pip",
+            "download",
+            "-r",
+            str(req_path),
+            "--python-version",
+            python_version,
+            "--only-binary=:all:",
+            "--dest",
+            str(wheel_dir),
+        ]
+        result = _run(cmd)
+
+        if result.returncode != 0:
+            # Retry without --only-binary, warn user
+            print(
+                "[pip] WARNING: --only-binary=:all: failed — retrying without it. "
+                "Source distributions will be compiled on the offline VM.",
+                file=sys.stderr,
+            )
+            cmd_retry = [c for c in cmd if c != "--only-binary=:all:"]
+            result = _run(cmd_retry)
+            if result.returncode != 0:
+                return PluginResult(
+                    success=False,
+                    message=f"[pip] pip download failed\nCommand: {' '.join(cmd_retry)}\n{result.stderr}",
+                    artifacts=[],
+                    errors=[result.stderr],
+                )
+
+        # Copy requirements file into bundle
+        bundle_req = ctx.bundle_dir / "pip" / "requirements.txt"
+        shutil.copy2(str(req_path), str(bundle_req))
+
+        artifacts = [str(wheel_dir), str(bundle_req)]
+        return PluginResult(
+            success=True,
+            message="[pip] Wheels downloaded successfully",
+            artifacts=artifacts,
+            errors=[],
+        )
+
+    def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
+        wheel_dir = ctx.bundle_dir / "pip" / "wheels"
+        req_file = ctx.bundle_dir / "pip" / "requirements.txt"
+
+        if not wheel_dir.exists() or not req_file.exists():
+            return PluginResult(
+                success=False,
+                message="[pip] Bundle is missing pip artifacts (wheels/ or requirements.txt)",
+                artifacts=[],
+                errors=["Missing pip artifacts in bundle"],
+            )
+
+        target_wheel_dir = Path("/srv/offline/pip/wheels")
+        target_req_file = Path("/srv/offline/pip/requirements.txt")
+
+        if ctx.dry_run:
+            return PluginResult(
+                success=True,
+                message=f"[dry-run] Would install wheels from {wheel_dir} → {target_wheel_dir}",
+                artifacts=[],
+                errors=[],
+            )
+
+        # 1. Copy artifacts to target
+        target_wheel_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(str(wheel_dir), str(target_wheel_dir), dirs_exist_ok=True)
+        shutil.copy2(str(req_file), str(target_req_file))
+
+        # 2. Write pip.conf to disable index and point to local wheelhouse
+        pip_conf = Path("/etc/pip.conf")
+        pip_conf.write_text(f"[global]\nno-index = true\nfind-links = {target_wheel_dir}\n")
+
+        # 3. Idempotence: parse currently installed packages
+        installed: dict[str, str] = {}
+        list_res = _run(["pip", "list", "--format=json"])
+        if list_res.returncode == 0:
+            try:
+                for entry in json.loads(list_res.stdout):
+                    installed[entry["name"].lower()] = entry["version"]
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        # 4. Install from local wheelhouse
+        install_cmd = [
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links",
+            str(target_wheel_dir),
+            "-r",
+            str(target_req_file),
+        ]
+        result = _run(install_cmd)
+        if result.returncode != 0:
+            return PluginResult(
+                success=False,
+                message=f"[pip] pip install failed\nCommand: {' '.join(install_cmd)}\n{result.stderr}",
+                artifacts=[],
+                errors=[result.stderr],
+            )
+
+        return PluginResult(
+            success=True,
+            message="[pip] Packages installed successfully from local wheelhouse",
+            artifacts=[str(target_wheel_dir), str(pip_conf)],
+            errors=[],
+        )
+
+    def diff(self, old_spec: dict[str, Any] | None, new_spec: dict[str, Any]) -> DiffResult:
+        """Phase 1 diff: compare requirements file path / spec equality."""
+        if old_spec is None:
+            return DiffResult(
+                plugin_name=self.name,
+                added=["(all requirements)"],
+                removed=[],
+                updated=[],
+                unchanged=[],
+            )
+        if old_spec == new_spec:
+            return DiffResult(
+                plugin_name=self.name,
+                added=[],
+                removed=[],
+                updated=[],
+                unchanged=["(spec unchanged)"],
+            )
+        return DiffResult(
+            plugin_name=self.name,
+            added=[],
+            removed=[],
+            updated=["(requirements spec changed)"],
+            unchanged=[],
+        )
+
+
+registry.register(PipPlugin())

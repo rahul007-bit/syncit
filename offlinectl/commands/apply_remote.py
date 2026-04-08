@@ -1,4 +1,4 @@
-"""offlinectl apply-remote — trigger apply command remotely via SSH."""
+"""offlinectl apply-remote — zero-dependency remote apply via SSH."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ err_console = Console(stderr=True)
 
 
 def apply_remote_cmd(
-    bundle_path: Path = typer.Argument(..., help="Path to local bundle archive"),
+    bundle_path: Path = typer.Option(..., "--bundle", "-b", help="Path to local bundle archive"),
     inventory: Path | None = typer.Option(None, "--inventory", "-i", help="Path to inventory YAML file"),
     target: str | None = typer.Option(None, "--target", "-t", help="Target host or group from inventory"),
     print_script: bool = typer.Option(False, "--print-script", help="Print the generated apply.sh and exit"),

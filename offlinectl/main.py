@@ -50,7 +50,7 @@ app.command("pack", help="Download and bundle all dependencies (run on online VM
 app.command("apply", help="Apply a bundle onto this machine (run on offline VM).")(apply_cmd)
 app.command("diff", help="Compare two bundle versions and show what changed.")(diff_cmd)
 app.command("transfer", help="Transfer a bundle to offline VMs via SCP.")(transfer_cmd)
-app.command("apply-remote", help="Run `offlinectl apply` on targeted remote VMs via SSH.")(
+app.command("apply-remote", help="Run zero-dependency remote apply via SSH snippet.")(
     apply_remote_cmd
 )
 

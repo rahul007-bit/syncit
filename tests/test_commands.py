@@ -332,7 +332,7 @@ def test_apply_remote_command(tmp_path: Path) -> None:
                     (tmp_path / "bundle.yaml").write_text(fixture_bundle)
 
                     result = runner.invoke(
-                        app, ["apply-remote", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
+                        app, ["apply-remote", "--bundle", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
                     )
 
     if result.exit_code != 0:
@@ -394,7 +394,7 @@ def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
                         Path("tests/fixtures/bundle.yaml").read_text()
                     )
                     result = runner.invoke(
-                        app, ["apply-remote", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
+                        app, ["apply-remote", "--bundle", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
                     )
 
     assert result.exit_code == 0
@@ -420,7 +420,7 @@ def test_apply_remote_print_script(tmp_path: Path) -> None:
                 Path("tests/fixtures/bundle.yaml").read_text()
             )
             result = runner.invoke(
-                app, ["apply-remote", str(bundle_path), "--print-script"]
+                app, ["apply-remote", "--bundle", str(bundle_path), "--print-script"]
             )
 
     assert result.exit_code == 0

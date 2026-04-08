@@ -406,3 +406,26 @@ def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
     ssh_call = mock_popen.call_args[0][0]
     assert "-i" in ssh_call
     assert "/home/user/.ssh/id_ed25519" in ssh_call
+
+
+def test_apply_remote_print_script(tmp_path: Path) -> None:
+    """Verify --print-script prints the script and exits without SSH/SCP."""
+    bundle_path = tmp_path / "b.tar.gz"
+    bundle_path.write_text("fake")
+
+    with patch("subprocess.run") as mock_run:
+        with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
+            mock_detect.return_value.__enter__.return_value = tmp_path
+            (tmp_path / "bundle.yaml").write_text(
+                Path("tests/fixtures/bundle.yaml").read_text()
+            )
+            result = runner.invoke(
+                app, ["apply-remote", str(bundle_path), "--print-script"]
+            )
+
+    assert result.exit_code == 0
+    assert "#!/usr/bin/env bash" in result.output
+    assert "Extracting bundle..." in result.output
+    
+    # Should be no network interaction
+    mock_run.assert_not_called()

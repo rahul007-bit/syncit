@@ -14,8 +14,9 @@ err_console = Console(stderr=True)
 
 def apply_remote_cmd(
     bundle_path: Path = typer.Argument(..., help="Path to local bundle archive"),
-    inventory: Path = typer.Option(..., "--inventory", "-i", help="Path to inventory YAML file"),
-    target: str = typer.Option(..., "--target", "-t", help="Target host or group from inventory"),
+    inventory: Path | None = typer.Option(None, "--inventory", "-i", help="Path to inventory YAML file"),
+    target: str | None = typer.Option(None, "--target", "-t", help="Target host or group from inventory"),
+    print_script: bool = typer.Option(False, "--print-script", help="Print the generated apply.sh and exit"),
 ) -> None:
     """Run zero-dependency remote apply on targeted VMs via SSH."""
     import shutil
@@ -30,18 +31,23 @@ def apply_remote_cmd(
         err_console.print(f"[red]Error: Bundle path '{bundle_path}' does not exist.[/red]")
         raise typer.Exit(1)
 
-    if not shutil.which("ssh") or not shutil.which("scp"):
-        err_console.print(
-            "[red]Error: 'ssh' and 'scp' commands are required on the jumphost.[/red]"
-        )
-        raise typer.Exit(1)
+    if not print_script:
+        if not inventory or not target:
+            err_console.print("[red]Error: --inventory and --target are required unless --print-script is used.[/red]")
+            raise typer.Exit(1)
 
-    try:
-        inv = load_inventory(inventory)
-        hosts = resolve_targets(inv, target)
-    except Exception as e:
-        err_console.print(f"[red]Error loading inventory or target: {e}[/red]")
-        raise typer.Exit(1)
+        if not shutil.which("ssh") or not shutil.which("scp"):
+            err_console.print(
+                "[red]Error: 'ssh' and 'scp' commands are required on the jumphost.[/red]"
+            )
+            raise typer.Exit(1)
+
+        try:
+            inv = load_inventory(inventory)
+            hosts = resolve_targets(inv, target)
+        except Exception as e:
+            err_console.print(f"[red]Error loading inventory or target: {e}[/red]")
+            raise typer.Exit(1)
 
     # Generate apply.sh
     try:
@@ -78,6 +84,10 @@ def apply_remote_cmd(
     except Exception as e:
         err_console.print(f"[red]Error generating apply.sh: {e}[/red]")
         raise typer.Exit(1)
+
+    if print_script:
+        print(apply_sh_content)
+        return
 
     with tempfile.NamedTemporaryFile("w", delete=False, prefix="apply-", suffix=".sh") as f:
         f.write(apply_sh_content)

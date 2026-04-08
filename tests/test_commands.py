@@ -322,16 +322,15 @@ def test_apply_remote_command(tmp_path: Path) -> None:
         with patch("subprocess.Popen") as mock_popen:
             mock_proc = MagicMock()
             mock_proc.returncode = 0
-            mock_proc.stdout = []
+            mock_proc.stdout.readline.return_value = ""  # EOF immediately
             mock_popen.return_value.__enter__.return_value = mock_proc
-            
+
             with patch("shutil.which", return_value="ssh"):
                 with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
                     mock_detect.return_value.__enter__.return_value = tmp_path
-                    import shutil
                     fixture_bundle = Path("tests/fixtures/bundle.yaml").read_text()
                     (tmp_path / "bundle.yaml").write_text(fixture_bundle)
-                    
+
                     result = runner.invoke(
                         app, ["apply-remote", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
                     )
@@ -340,17 +339,70 @@ def test_apply_remote_command(tmp_path: Path) -> None:
         print("EXCEPTION:", result.exception)
         print("OUTPUT:", result.output)
     assert result.exit_code == 0
-    
-    # SCP checks
-    scp_call = mock_run.call_args[0][0]
-    assert scp_call[0] == "scp"
-    assert str(bundle_path) == scp_call[-3]
-    assert "apply-" in scp_call[-2]
-    assert scp_call[-1] == "root@10.0.0.1:/opt"
 
-    # SSH checks
+    # subprocess.run is called twice: (1) SCP transfer, (2) SSH cleanup rm -f
+    assert mock_run.call_count == 2
+
+    # Call 0: SCP — transfers bundle + apply.sh together to remote
+    scp_call = mock_run.call_args_list[0][0][0]
+    assert scp_call[0] == "scp"
+    assert str(bundle_path) == scp_call[-3]  # bundle tarball
+    assert scp_call[-2].endswith(".sh")  # apply.sh tempfile
+    assert scp_call[-1] == "root@10.0.0.1:/opt"  # destination
+
+    # Call 1: SSH cleanup — rm -f apply.sh on target (best-effort)
+    cleanup_call = mock_run.call_args_list[1][0][0]
+    assert cleanup_call[0] == "ssh"
+    assert cleanup_call[-2] == "root@10.0.0.1"
+    assert "rm -f /opt/apply-" in cleanup_call[-1]
+
+    # Popen: streaming SSH execution — runs apply.sh on target, never offlinectl
     ssh_call = mock_popen.call_args[0][0]
     assert ssh_call[0] == "ssh"
-    assert ssh_call[1] == "root@10.0.0.1"
-    assert "sudo bash /opt/apply-" in ssh_call[2]
+    assert ssh_call[-2] == "root@10.0.0.1"
+    assert "sudo bash /opt/apply-" in ssh_call[-1]
+    assert ssh_call[-1].endswith(".sh /opt/b.tar.gz")
+    assert "offlinectl apply" not in ssh_call[-1]
 
+
+def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
+    """Verify --ssh-key is threaded through both scp and ssh invocations."""
+    inv_file = tmp_path / "inv.yaml"
+    inv_file.write_text(
+        "hosts:\n"
+        "  h1:\n"
+        "    host: 10.0.0.1\n"
+        "    user: deploy\n"
+        "    bundle_dest: /srv/bundles\n"
+        "    ssh_key: /home/user/.ssh/id_ed25519\n"
+    )
+    bundle_path = tmp_path / "b.tar.gz"
+    bundle_path.write_text("fake")
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        with patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout.readline.return_value = ""  # EOF immediately
+            mock_popen.return_value.__enter__.return_value = mock_proc
+
+            with patch("shutil.which", return_value="ssh"):
+                with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
+                    mock_detect.return_value.__enter__.return_value = tmp_path
+                    (tmp_path / "bundle.yaml").write_text(
+                        Path("tests/fixtures/bundle.yaml").read_text()
+                    )
+                    result = runner.invoke(
+                        app, ["apply-remote", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
+                    )
+
+    assert result.exit_code == 0
+
+    scp_call = mock_run.call_args_list[0][0][0]
+    assert "-i" in scp_call
+    assert "/home/user/.ssh/id_ed25519" in scp_call
+
+    ssh_call = mock_popen.call_args[0][0]
+    assert "-i" in ssh_call
+    assert "/home/user/.ssh/id_ed25519" in ssh_call

@@ -74,7 +74,7 @@ def apply_remote_cmd(
                         f"[yellow]Warning: Plugin {task.plugin} does not support zero-dependency remote apply.[/yellow]"
                     )
 
-            apply_sh_content = "\\n".join(script_lines)
+            apply_sh_content = "\n".join(script_lines)
     except Exception as e:
         err_console.print(f"[red]Error generating apply.sh: {e}[/red]")
         raise typer.Exit(1)
@@ -87,7 +87,7 @@ def apply_remote_cmd(
         errors = []
         for host_id, host in hosts:
             console.print(
-                f"\\nApplying bundle remotely on [bold cyan]{host_id}[/bold cyan] ({host.host})..."
+                f"\nApplying bundle remotely on [bold cyan]{host_id}[/bold cyan] ({host.host})..."
             )
 
             # 1. SCP the bundle and script
@@ -115,10 +115,11 @@ def apply_remote_cmd(
             remote_bundle = f"{host.bundle_dest.rstrip('/')}/{bundle_path.name}"
             remote_script = f"{host.bundle_dest.rstrip('/')}/{Path(apply_sh_local).name}"
 
-            remote_cmd = f"sudo bash {remote_script} {remote_bundle} && rm -f {remote_script}"
+            remote_cmd = f"sudo bash {remote_script} {remote_bundle}"
             ssh_args.append(remote_cmd)
 
             console.print(f"Running zero-dependency apply on {host_id}...")
+            host_failed = False
             with subprocess.Popen(
                 ssh_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             ) as proc:
@@ -132,12 +133,21 @@ def apply_remote_cmd(
                         f"[red]Failed to apply remotely on {host_id}. SSH exit code {proc.returncode}[/red]"
                     )
                     errors.append(host_id)
+                    host_failed = True
                 else:
                     console.print(f"[green]Successfully applied on {host_id}.[/green]")
 
+            # Step 8: Clean up apply.sh from target regardless of success/failure
+            cleanup_args = ["ssh"]
+            if host.ssh_key:
+                cleanup_args.extend(["-i", str(key_path)])
+            cleanup_args.append(f"{host.user}@{host.host}")
+            cleanup_args.append(f"rm -f {remote_script}")
+            subprocess.run(cleanup_args, capture_output=True)  # best-effort, ignore errors
+
         if errors:
             err_console.print(
-                f"\\n[red]Remote apply completed with errors on {len(errors)} host(s).[/red]"
+                f"\n[red]Remote apply completed with errors on {len(errors)} host(s).[/red]"
             )
             raise typer.Exit(1)
     finally:

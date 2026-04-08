@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from offlinectl.plugins.base import ApplyContext, PackContext
-from offlinectl.plugins.pip import PipPlugin
+from syncit.plugins.base import ApplyContext, PackContext
+from syncit.plugins.pip import PipPlugin
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ class TestPipPack:
     ) -> None:
         mock_ok = MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("offlinectl.plugins.pip.subprocess.run", return_value=mock_ok):
+        with patch("syncit.plugins.pip.subprocess.run", return_value=mock_ok):
             result = plugin.pack({"requirements": "requirements.txt"}, pack_ctx)
 
         assert result.success is True
@@ -88,7 +88,7 @@ class TestPipPack:
         self, plugin: PipPlugin, pack_ctx: PackContext
     ) -> None:
         mock_ok = MagicMock(returncode=0, stdout="", stderr="")
-        with patch("offlinectl.plugins.pip.subprocess.run", return_value=mock_ok):
+        with patch("syncit.plugins.pip.subprocess.run", return_value=mock_ok):
             plugin.pack({"requirements": "requirements.txt"}, pack_ctx)
 
         assert (pack_ctx.bundle_dir / "pip" / "requirements.txt").exists()
@@ -107,7 +107,7 @@ class TestPipPack:
                 return fail
             return ok
 
-        with patch("offlinectl.plugins.pip.subprocess.run", side_effect=side_effect):
+        with patch("syncit.plugins.pip.subprocess.run", side_effect=side_effect):
             result = plugin.pack({"requirements": "requirements.txt"}, pack_ctx)
 
         assert result.success is True
@@ -148,11 +148,11 @@ class TestPipApply:
         self._setup_bundle(apply_ctx.bundle_dir)
         mock_ok = MagicMock(returncode=0, stdout="[]", stderr="")
 
-        with patch("offlinectl.plugins.pip.subprocess.run", return_value=mock_ok):
-            with patch("offlinectl.plugins.pip.shutil.copytree"):
-                with patch("offlinectl.plugins.pip.shutil.copy2"):
-                    with patch("offlinectl.plugins.pip.Path.mkdir"):
-                        with patch("offlinectl.plugins.pip.Path.write_text") as mock_write:
+        with patch("syncit.plugins.pip.subprocess.run", return_value=mock_ok):
+            with patch("syncit.plugins.pip.shutil.copytree"):
+                with patch("syncit.plugins.pip.shutil.copy2"):
+                    with patch("syncit.plugins.pip.Path.mkdir"):
+                        with patch("syncit.plugins.pip.Path.write_text") as mock_write:
                             plugin.apply({}, apply_ctx)
 
         written_texts = [str(c.args[0]) for c in mock_write.call_args_list if c.args]
@@ -162,11 +162,11 @@ class TestPipApply:
         self._setup_bundle(apply_ctx.bundle_dir)
         mock_ok = MagicMock(returncode=0, stdout="[]", stderr="")
 
-        with patch("offlinectl.plugins.pip.subprocess.run", return_value=mock_ok) as mock_run:
-            with patch("offlinectl.plugins.pip.shutil.copytree"):
-                with patch("offlinectl.plugins.pip.shutil.copy2"):
-                    with patch("offlinectl.plugins.pip.Path.mkdir"):
-                        with patch("offlinectl.plugins.pip.Path.write_text"):
+        with patch("syncit.plugins.pip.subprocess.run", return_value=mock_ok) as mock_run:
+            with patch("syncit.plugins.pip.shutil.copytree"):
+                with patch("syncit.plugins.pip.shutil.copy2"):
+                    with patch("syncit.plugins.pip.Path.mkdir"):
+                        with patch("syncit.plugins.pip.Path.write_text"):
                             plugin.apply({}, apply_ctx)
 
         install_calls = [

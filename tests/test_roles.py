@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from offlinectl.manifest.loader import load_manifest
-from offlinectl.manifest.schema import BundleManifest
-from offlinectl.roles.expander import expand_roles
-from offlinectl.roles.loader import load_role
+from syncit.manifest.loader import load_manifest
+from syncit.manifest.schema import BundleManifest
+from syncit.roles.expander import expand_roles
+from syncit.roles.loader import load_role
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ def make_role_dir(tmp_path: Path, name: str, content: dict) -> Path:
 def make_manifest(tmp_path: Path, spec_overlay: dict | None = None) -> tuple[Path, BundleManifest]:
     """Create a minimal bundle.yaml and return (path, manifest)."""
     data: dict = {
-        "apiVersion": "offlinectl/v1",
+        "apiVersion": "syncit/v1",
         "kind": "Bundle",
         "metadata": {"name": "test-bundle", "version": "1.0.0"},
         "spec": {
@@ -232,7 +232,7 @@ class TestLoadManifestWithRoles:
         )
 
         data = {
-            "apiVersion": "offlinectl/v1",
+            "apiVersion": "syncit/v1",
             "kind": "Bundle",
             "metadata": {"name": "test", "version": "1.0.0"},
             "spec": {
@@ -250,7 +250,7 @@ class TestLoadManifestWithRoles:
 
     def test_load_manifest_without_roles_unchanged(self, tmp_path: Path) -> None:
         data = {
-            "apiVersion": "offlinectl/v1",
+            "apiVersion": "syncit/v1",
             "kind": "Bundle",
             "metadata": {"name": "test", "version": "1.0.0"},
             "spec": {

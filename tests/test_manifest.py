@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from offlinectl.manifest.loader import load_manifest
-from offlinectl.manifest.schema import TaskSpec
+from syncit.manifest.loader import load_manifest
+from syncit.manifest.schema import TaskSpec
 
 
 class TestLoadManifest:
@@ -64,7 +64,7 @@ class TestLoadManifest:
 class TestSchemaValidators:
     def _make_yaml(self, tmp_path: Path, overrides: dict) -> Path:
         data = {
-            "apiVersion": "offlinectl/v1",
+            "apiVersion": "syncit/v1",
             "kind": "Bundle",
             "metadata": {"name": "x", "version": "1.0"},
             "spec": {
@@ -89,7 +89,7 @@ class TestSchemaValidators:
 
     def test_missing_metadata_name_raises(self, tmp_path: Path) -> None:
         data = {
-            "apiVersion": "offlinectl/v1",
+            "apiVersion": "syncit/v1",
             "kind": "Bundle",
             "metadata": {"version": "1.0"},
             "spec": {

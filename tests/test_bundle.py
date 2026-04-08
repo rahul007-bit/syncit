@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from offlinectl.bundle.bundle import (
+from syncit.bundle.bundle import (
     BundleMetadata,
     BundleTaskMeta,
     compute_task_checksum,
     read_meta,
     write_meta,
 )
-from offlinectl.bundle.state import AppliedTask, BundleState, load_state, save_state
+from syncit.bundle.state import AppliedTask, BundleState, load_state, save_state
 
 
 class TestBundleMetadata:
@@ -24,7 +24,7 @@ class TestBundleMetadata:
             name="my-bundle",
             version="2025.04.0",
             created_at=datetime(2025, 4, 7, 12, 0, 0, tzinfo=UTC),
-            offlinectl_version="0.1.0",
+            syncit_version="0.1.0",
             targets={"distro": "ubuntu", "codename": "noble", "arch": "amd64"},
             tasks=[
                 BundleTaskMeta(
@@ -37,7 +37,7 @@ class TestBundleMetadata:
         loaded = read_meta(tmp_bundle_dir)
         assert loaded.name == "my-bundle"
         assert loaded.version == "2025.04.0"
-        assert loaded.offlinectl_version == "0.1.0"
+        assert loaded.syncit_version == "0.1.0"
         assert loaded.targets["distro"] == "ubuntu"
         assert len(loaded.tasks) == 1
         assert loaded.tasks[0].plugin == "apt"
@@ -51,7 +51,7 @@ class TestBundleMetadata:
             name="x",
             version="1.0",
             created_at=datetime(2025, 1, 1, tzinfo=UTC),
-            offlinectl_version="0.1.0",
+            syncit_version="0.1.0",
             targets={},
             tasks=[],
         )

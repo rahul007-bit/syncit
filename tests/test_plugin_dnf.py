@@ -1,8 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from offlinectl.plugins.base import ApplyContext, PackContext
-from offlinectl.plugins.dnf import DnfPlugin
+from syncit.plugins.base import ApplyContext, PackContext
+from syncit.plugins.dnf import DnfPlugin
 
 
 def test_dnf_validate() -> None:
@@ -63,7 +63,7 @@ def test_dnf_apply(mock_run, tmp_path: Path) -> None:
                 return original_path(str(sys_repo))
             return original_path(*args, **kwargs)
 
-    with patch("offlinectl.plugins.dnf.Path", new=MockPath):
+    with patch("syncit.plugins.dnf.Path", new=MockPath):
         res = plugin.apply({"packages": ["nginx"]}, ctx)
 
     assert res.success

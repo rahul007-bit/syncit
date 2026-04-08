@@ -1,6 +1,6 @@
 import pytest
 from typer.testing import CliRunner
-from offlinectl.main import app
+from syncit.main import app
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 runner = CliRunner()
@@ -19,9 +19,9 @@ def f():
             mock_proc.stdout = []
             mock_popen.return_value.__enter__.return_value = mock_proc
             with patch("shutil.which", return_value="ssh"):
-                with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
+                with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
                     mock_detect.return_value.__enter__.return_value = tmp_path
-                    (tmp_path / "bundle.yaml").write_text("apiVersion: offlinectl/v1\nkind: Bundle\nmetadata:\n  name: b\n  version: 1.0\nspec:\n  tasks: []")
+                    (tmp_path / "bundle.yaml").write_text("apiVersion: syncit/v1\nkind: Bundle\nmetadata:\n  name: b\n  version: 1.0\nspec:\n  tasks: []")
                     result = runner.invoke(app, ["apply-remote", str(bundle_path), "-i", str(inv_file), "-t", "h1"])
                     print(result.output)
                     if result.exception: print(result.exception)

@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from offlinectl.bundle.bundle import BundleMetadata, write_meta
-from offlinectl.main import app
+from syncit.bundle.bundle import BundleMetadata, write_meta
+from syncit.main import app
 
 runner = CliRunner()
 
@@ -17,11 +17,11 @@ runner = CliRunner()
 def test_main_version() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "offlinectl" in result.stdout
+    assert "syncit" in result.stdout
 
 
 def test_validate_valid_manifest(bundle_yaml: Path) -> None:
-    with patch("offlinectl.plugins.oci_image._has_cmd", return_value=True):
+    with patch("syncit.plugins.oci_image._has_cmd", return_value=True):
         with patch("shutil.which", return_value="fake_path"):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0)
@@ -48,8 +48,8 @@ def test_validate_skips_unknown_plugin(fixture_dir: Path, tmp_path: Path) -> Non
 
 def test_pack_dry_run(bundle_yaml: Path, tmp_path: Path) -> None:
     out_dir = tmp_path / "bundles"
-    # Ensure offlinectl/plugins/oci_image._has_cmd returns True to pass validation step if it executes it
-    with patch("offlinectl.plugins.oci_image._has_cmd", return_value=True):
+    # Ensure syncit/plugins/oci_image._has_cmd returns True to pass validation step if it executes it
+    with patch("syncit.plugins.oci_image._has_cmd", return_value=True):
         result = runner.invoke(
             app, ["pack", str(bundle_yaml), "--output", str(out_dir), "--dry-run"]
         )
@@ -78,13 +78,13 @@ def test_pack_continue_on_error(fixture_dir: Path, tmp_path: Path) -> None:
     # Actually `--continue-on-error` doesn't exist natively on pack, but failures normally raise typer.Exit(1).
     # Pack returns `result.success` from plugin.pack
     # We can mock plugin 'apt' to return a failed PluginResult
-    with patch("offlinectl.plugins.apt.AptPlugin.pack") as mock_pack:
-        from offlinectl.plugins.base import PluginResult
+    with patch("syncit.plugins.apt.AptPlugin.pack") as mock_pack:
+        from syncit.plugins.base import PluginResult
 
         mock_pack.return_value = PluginResult(
             success=False, message="failed", artifacts=[], errors=["apt error"]
         )
-        with patch("offlinectl.plugins.oci_image._has_cmd", return_value=True):
+        with patch("syncit.plugins.oci_image._has_cmd", return_value=True):
             result = runner.invoke(
                 app, ["pack", str(fixture_dir / "bundle.yaml"), "--output", str(tmp_path)]
             )
@@ -118,7 +118,7 @@ def _setup_mock_bundle(bundle_dir: Path, manifest_content: str) -> None:
         name="test",
         version="1.0",
         created_at=datetime.now(UTC),
-        offlinectl_version="0.1",
+        syncit_version="0.1",
         targets={"distro": "u", "codename": "c", "arch": "a"},
         tasks=[],
     )
@@ -129,7 +129,7 @@ def test_apply_dry_run(fixture_dir: Path, tmp_path: Path) -> None:
     bundle_dir = tmp_path / "bundle"
     _setup_mock_bundle(bundle_dir, fixture_dir.joinpath("bundle.yaml").read_text())
 
-    with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="docker"):
+    with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
         result = runner.invoke(app, ["apply", str(bundle_dir), "--dry-run"])
     assert result.exit_code == 0
     assert "dry-run mode" in result.stdout
@@ -163,7 +163,7 @@ def test_apply_with_force_and_only(fixture_dir: Path, tmp_path: Path) -> None:
     bundle_dir = tmp_path / "bundle"
     _setup_mock_bundle(bundle_dir, fixture_dir.joinpath("bundle.yaml").read_text())
 
-    with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="docker"):
+    with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
         result = runner.invoke(
             app, ["apply", str(bundle_dir), "--dry-run", "--force", "--only", "apt"]
         )
@@ -213,13 +213,13 @@ def test_diff_unknown_plugin(fixture_dir: Path, tmp_path: Path) -> None:
 def test_pack_archive_format(bundle_yaml: Path, tmp_path: Path) -> None:
     out_dir = tmp_path / "bundles"
 
-    with patch("offlinectl.plugins.apt.AptPlugin.pack") as mock_pack:
-        from offlinectl.plugins.base import PluginResult
+    with patch("syncit.plugins.apt.AptPlugin.pack") as mock_pack:
+        from syncit.plugins.base import PluginResult
 
         mock_pack.return_value = PluginResult(
             success=True, message="mocked", artifacts=[], errors=[]
         )
-        with patch("offlinectl.plugins.apt.AptPlugin.validate", return_value=[]):
+        with patch("syncit.plugins.apt.AptPlugin.validate", return_value=[]):
             result = runner.invoke(
                 app,
                 [
@@ -245,11 +245,11 @@ def test_apply_archive_format(fixture_dir: Path, tmp_path: Path) -> None:
     _setup_mock_bundle(bundle_dir, fixture_dir.joinpath("bundle.yaml").read_text())
 
     # Now let's compress it to tar.gz manually so we can test apply detecting it
-    from offlinectl.bundle.archive import pack_archive
+    from syncit.bundle.archive import pack_archive
 
     archive_path = pack_archive(bundle_dir, tmp_path / "test-archive", "tar.gz")
 
-    with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="docker"):
+    with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
         result = runner.invoke(app, ["apply", str(archive_path), "--dry-run"])
 
     assert result.exit_code == 0
@@ -326,13 +326,22 @@ def test_apply_remote_command(tmp_path: Path) -> None:
             mock_popen.return_value.__enter__.return_value = mock_proc
 
             with patch("shutil.which", return_value="ssh"):
-                with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
+                with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
                     mock_detect.return_value.__enter__.return_value = tmp_path
                     fixture_bundle = Path("tests/fixtures/bundle.yaml").read_text()
                     (tmp_path / "bundle.yaml").write_text(fixture_bundle)
 
                     result = runner.invoke(
-                        app, ["apply-remote", "--bundle", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
+                        app,
+                        [
+                            "apply-remote",
+                            "--bundle",
+                            str(bundle_path),
+                            "-i",
+                            str(inv_file),
+                            "-t",
+                            "h1",
+                        ],
                     )
 
     if result.exit_code != 0:
@@ -356,13 +365,13 @@ def test_apply_remote_command(tmp_path: Path) -> None:
     assert cleanup_call[-2] == "root@10.0.0.1"
     assert "rm -f /opt/apply-" in cleanup_call[-1]
 
-    # Popen: streaming SSH execution — runs apply.sh on target, never offlinectl
+    # Popen: streaming SSH execution — runs apply.sh on target, never syncit
     ssh_call = mock_popen.call_args[0][0]
     assert ssh_call[0] == "ssh"
     assert ssh_call[-2] == "root@10.0.0.1"
     assert "sudo bash /opt/apply-" in ssh_call[-1]
     assert ssh_call[-1].endswith(".sh /opt/b.tar.gz")
-    assert "offlinectl apply" not in ssh_call[-1]
+    assert "syncit apply" not in ssh_call[-1]
 
 
 def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
@@ -388,13 +397,22 @@ def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
             mock_popen.return_value.__enter__.return_value = mock_proc
 
             with patch("shutil.which", return_value="ssh"):
-                with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
+                with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
                     mock_detect.return_value.__enter__.return_value = tmp_path
                     (tmp_path / "bundle.yaml").write_text(
                         Path("tests/fixtures/bundle.yaml").read_text()
                     )
                     result = runner.invoke(
-                        app, ["apply-remote", "--bundle", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
+                        app,
+                        [
+                            "apply-remote",
+                            "--bundle",
+                            str(bundle_path),
+                            "-i",
+                            str(inv_file),
+                            "-t",
+                            "h1",
+                        ],
                     )
 
     assert result.exit_code == 0
@@ -414,11 +432,9 @@ def test_apply_remote_print_script(tmp_path: Path) -> None:
     bundle_path.write_text("fake")
 
     with patch("subprocess.run") as mock_run:
-        with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
+        with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
             mock_detect.return_value.__enter__.return_value = tmp_path
-            (tmp_path / "bundle.yaml").write_text(
-                Path("tests/fixtures/bundle.yaml").read_text()
-            )
+            (tmp_path / "bundle.yaml").write_text(Path("tests/fixtures/bundle.yaml").read_text())
             result = runner.invoke(
                 app, ["apply-remote", "--bundle", str(bundle_path), "--print-script"]
             )
@@ -426,6 +442,6 @@ def test_apply_remote_print_script(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "#!/usr/bin/env bash" in result.output
     assert "Extracting bundle archive..." in result.output
-    
+
     # Should be no network interaction
     mock_run.assert_not_called()

@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from offlinectl.plugins.base import ApplyContext, PackContext
-from offlinectl.plugins.oci_image import OciImagePlugin, _safe_name
+from syncit.plugins.base import ApplyContext, PackContext
+from syncit.plugins.oci_image import OciImagePlugin, _safe_name
 
 
 @pytest.fixture
@@ -56,22 +56,22 @@ class TestSafeName:
 
 class TestOciValidate:
     def test_valid_spec_with_skopeo_present(self, plugin: OciImagePlugin) -> None:
-        with patch("offlinectl.plugins.oci_image.shutil.which", return_value="/usr/bin/skopeo"):
+        with patch("syncit.plugins.oci_image.shutil.which", return_value="/usr/bin/skopeo"):
             errors = plugin.validate({"images": [{"source": "alpine:latest"}]})
         assert errors == []
 
     def test_missing_images_returns_error(self, plugin: OciImagePlugin) -> None:
-        with patch("offlinectl.plugins.oci_image.shutil.which", return_value="/usr/bin/skopeo"):
+        with patch("syncit.plugins.oci_image.shutil.which", return_value="/usr/bin/skopeo"):
             errors = plugin.validate({})
         assert any("images" in e for e in errors)
 
     def test_image_missing_source_returns_error(self, plugin: OciImagePlugin) -> None:
-        with patch("offlinectl.plugins.oci_image.shutil.which", return_value="/usr/bin/skopeo"):
+        with patch("syncit.plugins.oci_image.shutil.which", return_value="/usr/bin/skopeo"):
             errors = plugin.validate({"images": [{"name": "alpine"}]})
         assert any("source" in e.lower() for e in errors)
 
     def test_skopeo_missing_returns_error(self, plugin: OciImagePlugin) -> None:
-        with patch("offlinectl.plugins.oci_image.shutil.which", return_value=None):
+        with patch("syncit.plugins.oci_image.shutil.which", return_value=None):
             errors = plugin.validate({"images": [{"source": "alpine:latest"}]})
         assert any("skopeo" in e.lower() for e in errors)
 
@@ -91,7 +91,7 @@ class TestOciPack:
     def test_skopeo_not_found_returns_failure(
         self, plugin: OciImagePlugin, pack_ctx: PackContext
     ) -> None:
-        with patch("offlinectl.plugins.oci_image._has_cmd", return_value=False):
+        with patch("syncit.plugins.oci_image._has_cmd", return_value=False):
             result = plugin.pack({"images": SAMPLE_IMAGES}, pack_ctx)
         assert result.success is False
         assert "skopeo" in result.errors[0].lower()
@@ -101,8 +101,8 @@ class TestOciPack:
     ) -> None:
         mock_ok = MagicMock(returncode=0, stdout='{"Digest": "sha256:abc"}', stderr="")
 
-        with patch("offlinectl.plugins.oci_image._has_cmd", return_value=True):
-            with patch("offlinectl.plugins.oci_image.subprocess.run", return_value=mock_ok):
+        with patch("syncit.plugins.oci_image._has_cmd", return_value=True):
+            with patch("syncit.plugins.oci_image.subprocess.run", return_value=mock_ok):
                 result = plugin.pack({"images": SAMPLE_IMAGES}, pack_ctx)
 
         assert result.success is True
@@ -110,8 +110,8 @@ class TestOciPack:
     def test_pack_writes_manifest_json(self, plugin: OciImagePlugin, pack_ctx: PackContext) -> None:
         mock_ok = MagicMock(returncode=0, stdout='{"Digest": "sha256:abc"}', stderr="")
 
-        with patch("offlinectl.plugins.oci_image._has_cmd", return_value=True):
-            with patch("offlinectl.plugins.oci_image.subprocess.run", return_value=mock_ok):
+        with patch("syncit.plugins.oci_image._has_cmd", return_value=True):
+            with patch("syncit.plugins.oci_image.subprocess.run", return_value=mock_ok):
                 plugin.pack({"images": SAMPLE_IMAGES}, pack_ctx)
 
         manifest_file = pack_ctx.bundle_dir / "images" / "manifest.json"
@@ -125,8 +125,8 @@ class TestOciPack:
     ) -> None:
         mock_fail = MagicMock(returncode=1, stdout="", stderr="timeout")
 
-        with patch("offlinectl.plugins.oci_image._has_cmd", return_value=True):
-            with patch("offlinectl.plugins.oci_image.subprocess.run", return_value=mock_fail):
+        with patch("syncit.plugins.oci_image._has_cmd", return_value=True):
+            with patch("syncit.plugins.oci_image.subprocess.run", return_value=mock_fail):
                 result = plugin.pack({"images": SAMPLE_IMAGES}, pack_ctx)
 
         assert result.success is False
@@ -151,7 +151,7 @@ class TestOciApply:
     def test_dry_run_returns_success(self, plugin: OciImagePlugin, apply_ctx: ApplyContext) -> None:
         self._setup_bundle(apply_ctx.bundle_dir)
         apply_ctx.dry_run = True
-        with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="docker"):
+        with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
             result = plugin.apply({"images": [{"source": "alpine:latest"}]}, apply_ctx)
         assert result.success is True
         assert "dry-run" in result.message.lower()
@@ -167,7 +167,7 @@ class TestOciApply:
         self, plugin: OciImagePlugin, apply_ctx: ApplyContext
     ) -> None:
         self._setup_bundle(apply_ctx.bundle_dir)
-        with patch("offlinectl.plugins.oci_image._detect_runtime", return_value=None):
+        with patch("syncit.plugins.oci_image._detect_runtime", return_value=None):
             result = plugin.apply({}, apply_ctx)
         assert result.success is False
         assert len(result.errors) > 0
@@ -176,8 +176,8 @@ class TestOciApply:
         self._setup_bundle(apply_ctx.bundle_dir)
         mock_ok = MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="docker"):
-            with patch("offlinectl.plugins.oci_image._run", return_value=mock_ok):
+        with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
+            with patch("syncit.plugins.oci_image._run", return_value=mock_ok):
                 with patch.object(plugin, "_image_exists", return_value=False):
                     result = plugin.apply({}, apply_ctx)
 
@@ -194,8 +194,8 @@ class TestOciApply:
             captured_cmds.append(cmd)
             return mock_ok
 
-        with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="podman"):
-            with patch("offlinectl.plugins.oci_image._run", side_effect=capture_run):
+        with patch("syncit.plugins.oci_image._detect_runtime", return_value="podman"):
+            with patch("syncit.plugins.oci_image._run", side_effect=capture_run):
                 with patch.object(plugin, "_image_exists", return_value=False):
                     plugin.apply({}, apply_ctx)
 
@@ -207,8 +207,8 @@ class TestOciApply:
         self._setup_bundle(apply_ctx.bundle_dir)
         apply_ctx.verbose = True
 
-        with patch("offlinectl.plugins.oci_image._detect_runtime", return_value="docker"):
-            with patch("offlinectl.plugins.oci_image._run") as mock_run:
+        with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
+            with patch("syncit.plugins.oci_image._run") as mock_run:
                 with patch.object(plugin, "_image_exists", return_value=True):
                     result = plugin.apply({}, apply_ctx)
 

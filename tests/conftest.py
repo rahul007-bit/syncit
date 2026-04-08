@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for offlinectl tests."""
+"""Shared pytest fixtures for syncit tests."""
 
 from __future__ import annotations
 

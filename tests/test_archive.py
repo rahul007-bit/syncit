@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from offlinectl.bundle.archive import detect_bundle, extract_archive, is_archive, pack_archive
+from syncit.bundle.archive import detect_bundle, extract_archive, is_archive, pack_archive
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def mock_bundle(tmp_path: Path) -> Path:
         "name": "test",
         "version": "1.0",
         "created_at": datetime.now(UTC).isoformat(),
-        "offlinectl_version": "0.1",
+        "syncit_version": "0.1",
         "targets": {"distro": "u", "codename": "c", "arch": "a"},
         "tasks": [],
     }
@@ -82,7 +82,7 @@ def test_detect_bundle_with_tar_gz(mock_bundle: Path, tmp_path: Path) -> None:
 
     with detect_bundle(archive) as bundle:
         assert bundle.is_dir()
-        assert bundle.parent.name.startswith("offlinectl-bundle-")  # it was extracted
+        assert bundle.parent.name.startswith("syncit-bundle-")  # it was extracted
         assert (bundle / "bundle.meta.json").exists()
 
     # ensure it gets cleaned up

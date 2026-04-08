@@ -1,8 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from offlinectl.plugins.base import ApplyContext, PackContext
-from offlinectl.plugins.cargo import CargoPlugin
+from syncit.plugins.base import ApplyContext, PackContext
+from syncit.plugins.cargo import CargoPlugin
 
 
 def test_cargo_validate() -> None:

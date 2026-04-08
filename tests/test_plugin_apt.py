@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from offlinectl.plugins.apt import AptPlugin
-from offlinectl.plugins.base import ApplyContext, PackContext
+from syncit.plugins.apt import AptPlugin
+from syncit.plugins.base import ApplyContext, PackContext
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ class TestAptPack:
         mock_result.stdout = "Package: git\n"
         mock_result.stderr = ""
 
-        with patch("offlinectl.plugins.apt.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result) as mock_run:
             plugin.pack({"packages": ["git"]}, pack_ctx)
 
         # apt-cache depends should be called
@@ -97,7 +97,7 @@ class TestAptPack:
         mock_result.stdout = "Package: git\n"
         mock_result.stderr = ""
 
-        with patch("offlinectl.plugins.apt.subprocess.run", return_value=mock_result):
+        with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result):
             plugin.pack({"packages": ["git"]}, pack_ctx)
 
         assert (pack_ctx.bundle_dir / "apt" / "debs" / "Packages").exists()
@@ -108,7 +108,7 @@ class TestAptPack:
         mock_result.stdout = ""
         mock_result.stderr = ""
 
-        with patch("offlinectl.plugins.apt.subprocess.run", return_value=mock_result):
+        with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result):
             plugin.pack({"packages": ["git"]}, pack_ctx)
 
         sources = (pack_ctx.bundle_dir / "apt" / "sources.list").read_text()
@@ -128,7 +128,7 @@ class TestAptPack:
 """
         mock_result.stderr = ""
 
-        with patch("offlinectl.plugins.apt.subprocess.run") as mock_run:
+        with patch("syncit.plugins.apt.subprocess.run") as mock_run:
 
             def side_effect(cmd, **kwargs):
                 if cmd[0] == "apt-cache":
@@ -187,10 +187,10 @@ class TestAptApply:
                 return mock_not_installed
             return mock_ok
 
-        with patch("offlinectl.plugins.apt.subprocess.run", side_effect=side_effect):
-            with patch("offlinectl.plugins.apt.shutil.copytree"):
-                with patch("offlinectl.plugins.apt.Path.mkdir"):
-                    with patch("offlinectl.plugins.apt.Path.write_text"):
+        with patch("syncit.plugins.apt.subprocess.run", side_effect=side_effect):
+            with patch("syncit.plugins.apt.shutil.copytree"):
+                with patch("syncit.plugins.apt.Path.mkdir"):
+                    with patch("syncit.plugins.apt.Path.write_text"):
                         result = plugin.apply({"packages": ["git"]}, apply_ctx)
 
         assert result.success is True
@@ -202,10 +202,10 @@ class TestAptApply:
 
         mock_ok = MagicMock(returncode=0, stdout="ii  git", stderr="")
 
-        with patch("offlinectl.plugins.apt.subprocess.run", return_value=mock_ok):
-            with patch("offlinectl.plugins.apt.shutil.copytree"):
-                with patch("offlinectl.plugins.apt.Path.mkdir"):
-                    with patch("offlinectl.plugins.apt.Path.write_text"):
+        with patch("syncit.plugins.apt.subprocess.run", return_value=mock_ok):
+            with patch("syncit.plugins.apt.shutil.copytree"):
+                with patch("syncit.plugins.apt.Path.mkdir"):
+                    with patch("syncit.plugins.apt.Path.write_text"):
                         result = plugin.apply({"packages": ["git"]}, apply_ctx)
 
         assert result.success is True
@@ -262,8 +262,11 @@ class TestAptRenderApplySh:
 
         # Verify update command has isolation
         assert "apt-get update" in snippet
-        assert "-o Dir::Etc::SourceList=" in snippet.split("apt-get update")[1].split("apt-get install")[0]
-        assert "-o Dir::Etc::SourceParts=\"/dev/null\"" in snippet
+        assert (
+            "-o Dir::Etc::SourceList="
+            in snippet.split("apt-get update")[1].split("apt-get install")[0]
+        )
+        assert '-o Dir::Etc::SourceParts="/dev/null"' in snippet
 
         # Verify install command has isolation
         assert "apt-get install" in snippet
@@ -271,4 +274,4 @@ class TestAptRenderApplySh:
 
         # Verify no system paths used for sources
         assert "/etc/apt/sources.list.d/" not in snippet
-        assert "SOURCES_FILE=\"$BUNDLE_DIR/apt/offlinectl.list\"" in snippet
+        assert 'SOURCES_FILE="$BUNDLE_DIR/apt/syncit.list"' in snippet

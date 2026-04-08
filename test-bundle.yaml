@@ -1,4 +1,4 @@
-apiVersion: offlinectl/v1
+apiVersion: syncit/v1
 kind: Bundle
 metadata:
   name: ubuntu-smoke-test

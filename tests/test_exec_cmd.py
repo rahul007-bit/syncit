@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from offlinectl.main import app
+from syncit.main import app
 
 runner = CliRunner()
 
@@ -153,7 +153,7 @@ class TestExecParallel:
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            with patch("offlinectl.commands.exec_cmd.ThreadPoolExecutor") as mock_tpe:
+            with patch("syncit.commands.exec_cmd.ThreadPoolExecutor") as mock_tpe:
                 mock_executor = MagicMock()
                 mock_tpe.return_value.__enter__ = MagicMock(return_value=mock_executor)
                 mock_tpe.return_value.__exit__ = MagicMock()
@@ -162,7 +162,7 @@ class TestExecParallel:
                 done_future.set_result(None)
                 mock_executor.submit.return_value = done_future
 
-                with patch("offlinectl.commands.exec_cmd.as_completed") as mock_as_completed:
+                with patch("syncit.commands.exec_cmd.as_completed") as mock_as_completed:
                     # Return an iterable over the submitted futures
                     mock_as_completed.return_value = iter(mock_executor.submit.call_args_list)
 

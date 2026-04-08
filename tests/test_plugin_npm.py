@@ -1,8 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from offlinectl.plugins.base import ApplyContext, PackContext
-from offlinectl.plugins.npm import NpmPlugin
+from syncit.plugins.base import ApplyContext, PackContext
+from syncit.plugins.npm import NpmPlugin
 
 
 def test_npm_validate() -> None:

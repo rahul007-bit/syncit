@@ -1,8 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from offlinectl.plugins.base import ApplyContext, PackContext
-from offlinectl.plugins.go import GoPlugin
+from syncit.plugins.base import ApplyContext, PackContext
+from syncit.plugins.go import GoPlugin
 
 
 def test_go_validate() -> None:
@@ -69,7 +69,7 @@ def test_go_apply(tmp_path: Path, monkeypatch) -> None:
                 return original_path(str(sys_profile))
             return original_path(*args, **kwargs)
 
-    with patch("offlinectl.plugins.go.Path", new=MockPath):
+    with patch("syncit.plugins.go.Path", new=MockPath):
         res = plugin.apply(spec, ctx)
 
     assert res.success

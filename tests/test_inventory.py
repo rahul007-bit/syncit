@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from offlinectl.inventory.loader import load_inventory, resolve_targets
-from offlinectl.inventory.schema import Inventory
+from syncit.inventory.loader import load_inventory, resolve_targets
+from syncit.inventory.schema import Inventory
 
 
 def test_load_inventory_valid(tmp_path: Path) -> None:
@@ -19,7 +19,7 @@ def test_load_inventory_valid(tmp_path: Path) -> None:
       db-server:
         host: 192.168.1.51
         user: root
-        bundle_dest: /tmp/offlinectl
+        bundle_dest: /tmp/syncit
     groups:
       all-servers:
         - app-server
@@ -30,7 +30,7 @@ def test_load_inventory_valid(tmp_path: Path) -> None:
     inv = load_inventory(inv_file)
     assert len(inv.hosts) == 2
     assert inv.hosts["app-server"].user == "deploy"
-    assert inv.hosts["db-server"].bundle_dest == "/tmp/offlinectl"
+    assert inv.hosts["db-server"].bundle_dest == "/tmp/syncit"
     assert "all-servers" in inv.groups
     assert len(inv.groups["all-servers"]) == 2
 

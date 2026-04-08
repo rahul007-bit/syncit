@@ -310,11 +310,18 @@ class AptPlugin(OfflinePlugin):
         packages = " ".join(task_spec.get("packages", []))
         return f"""
 echo "[apt] Configuring local repository..."
-# We point to both possible locations (root and debs/) to be robust
-echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir}/debs ./" \\
+if [ -f "$BUNDLE_DIR/{bundle_subdir}/debs/Packages" ]; then
+  REPO_PATH="$BUNDLE_DIR/{bundle_subdir}/debs"
+elif [ -f "$BUNDLE_DIR/{bundle_subdir}/Packages" ]; then
+  REPO_PATH="$BUNDLE_DIR/{bundle_subdir}"
+else
+  echo "[apt] ERROR: Could not find Packages index in $BUNDLE_DIR/{bundle_subdir}"
+  exit 1
+fi
+
+echo "deb [trusted=yes] file://$REPO_PATH ./" \\
   | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
-echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir} ./" \\
-  | sudo tee -a /etc/apt/sources.list.d/offlinectl.list > /dev/null
+
 sudo apt-get update \\
   -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/offlinectl.list \\
   -o Dir::Etc::sourcelistparts=/dev/null \\

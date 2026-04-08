@@ -159,10 +159,17 @@ class AptPlugin(OfflinePlugin):
             if all_pkgs:
                 errors.append("[apt] dpkg-scanpackages produced empty index despite finding packages. Ensure .deb files were downloaded.")
         else:
+            # Write index to the debs/ directory (standard flat repo)
             packages_file.write_text(idx_res.stdout)
+            
+            # Write index to the parent directory as well for redundancy
+            (ctx.bundle_dir / "apt" / "Packages").write_text(idx_res.stdout)
+            
             # Standard practice: provide gzip version too
             import gzip
             with gzip.open(str(deb_dir / "Packages.gz"), "wt") as f:
+                f.write(idx_res.stdout)
+            with gzip.open(str(ctx.bundle_dir / "apt" / "Packages.gz"), "wt") as f:
                 f.write(idx_res.stdout)
 
         # 4. Write sources.list fragment (primarily for local apply)
@@ -303,8 +310,11 @@ class AptPlugin(OfflinePlugin):
         packages = " ".join(task_spec.get("packages", []))
         return f"""
 echo "[apt] Configuring local repository..."
+# We point to both possible locations (root and debs/) to be robust
 echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir}/debs ./" \\
   | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
+echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir} ./" \\
+  | sudo tee -a /etc/apt/sources.list.d/offlinectl.list > /dev/null
 sudo apt-get update \\
   -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/offlinectl.list \\
   -o Dir::Etc::sourcelistparts=/dev/null \\

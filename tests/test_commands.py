@@ -314,18 +314,43 @@ def test_apply_remote_command(tmp_path: Path) -> None:
         "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n    state_file: /s.json\n    bundle_dest: /opt"
     )
 
+    bundle_path = tmp_path / "b.tar.gz"
+    bundle_path.write_text("fake tar")
+
     with patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = "Applied successfully"
-        mock_run.return_value.stderr = ""
-        with patch("shutil.which", return_value="ssh"):
-            result = runner.invoke(
-                app, ["apply-remote", "--bundle", "b.tar.gz", "-i", str(inv_file), "-t", "h1"]
-            )
+        with patch("subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout = []
+            mock_popen.return_value.__enter__.return_value = mock_proc
+            
+            with patch("shutil.which", return_value="ssh"):
+                with patch("offlinectl.bundle.archive.detect_bundle") as mock_detect:
+                    mock_detect.return_value.__enter__.return_value = tmp_path
+                    import shutil
+                    fixture_bundle = Path("tests/fixtures/bundle.yaml").read_text()
+                    (tmp_path / "bundle.yaml").write_text(fixture_bundle)
+                    
+                    result = runner.invoke(
+                        app, ["apply-remote", str(bundle_path), "-i", str(inv_file), "-t", "h1"]
+                    )
 
+    if result.exit_code != 0:
+        print("EXCEPTION:", result.exception)
+        print("OUTPUT:", result.output)
     assert result.exit_code == 0
-    mock_run.assert_called_once()
-    args = mock_run.call_args[0][0]
-    assert args[0] == "ssh"
-    assert args[1] == "root@10.0.0.1"
-    assert args[2] == "offlinectl apply /opt/b.tar.gz --state-file /s.json"
+    
+    # SCP checks
+    scp_call = mock_run.call_args[0][0]
+    assert scp_call[0] == "scp"
+    assert str(bundle_path) == scp_call[-3]
+    assert "apply-" in scp_call[-2]
+    assert scp_call[-1] == "root@10.0.0.1:/opt"
+
+    # SSH checks
+    ssh_call = mock_popen.call_args[0][0]
+    assert ssh_call[0] == "ssh"
+    assert ssh_call[1] == "root@10.0.0.1"
+    assert "sudo bash /opt/apply-" in ssh_call[2]
+

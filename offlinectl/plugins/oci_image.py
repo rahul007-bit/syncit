@@ -247,5 +247,30 @@ class OciImagePlugin(OfflinePlugin):
             unchanged=unchanged,
         )
 
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        return f"""
+echo "[oci_image] Loading container images..."
+if command -v docker &> /dev/null; then
+    RUNTIME="docker"
+    LOAD_ARGS="load -i"
+elif command -v podman &> /dev/null; then
+    RUNTIME="podman"
+    LOAD_ARGS="load -i"
+elif command -v ctr &> /dev/null; then
+    RUNTIME="ctr"
+    LOAD_ARGS="images import"
+else
+    echo "[oci_image] ERROR: No container runtime found (docker, podman, ctr)"
+    exit 1
+fi
+
+for archive in $BUNDLE_DIR/{bundle_subdir}/images/*.tar; do
+    if [ -f "$archive" ]; then
+        echo "  → Loading $archive..."
+        $RUNTIME $LOAD_ARGS "$archive"
+    fi
+done
+"""
+
 
 registry.register(OciImagePlugin())

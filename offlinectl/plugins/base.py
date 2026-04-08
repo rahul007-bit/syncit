@@ -76,3 +76,11 @@ class OfflinePlugin(ABC):
         old_spec=None means this task is brand new.
         """
         pass
+
+    @abstractmethod
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        """
+        Generate a bash strictly relying on native OS dependencies for zero-dependency remote apply.
+        `bundle_subdir` is the sub-directory name for this plugin within `$BUNDLE_DIR` (e.g. "apt", "pip").
+        """
+        pass

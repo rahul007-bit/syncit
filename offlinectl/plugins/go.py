@@ -142,5 +142,15 @@ class GoPlugin(OfflinePlugin):
             unchanged=[],
         )
 
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        return f"""
+echo "[go] Applying global go modcache..."
+mkdir -p /opt/offline/go/modcache
+cp -r $BUNDLE_DIR/{bundle_subdir}/modcache/* /opt/offline/go/modcache/ 2>/dev/null || true
+echo "export GOMODCACHE=/opt/offline/go/modcache" > /etc/profile.d/offline-go.sh
+echo "export GOPROXY=off" >> /etc/profile.d/offline-go.sh
+echo "export GONOSUMCHECK=*" >> /etc/profile.d/offline-go.sh
+"""
+
 
 registry.register(GoPlugin())

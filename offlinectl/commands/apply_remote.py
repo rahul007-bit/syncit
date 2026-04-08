@@ -13,18 +13,26 @@ err_console = Console(stderr=True)
 
 
 def apply_remote_cmd(
-    bundle_filename: str = typer.Option(..., "--bundle", help="Filename of the transferred bundle"),
+    bundle_path: Path = typer.Argument(..., help="Path to local bundle archive"),
     inventory: Path = typer.Option(..., "--inventory", "-i", help="Path to inventory YAML file"),
     target: str = typer.Option(..., "--target", "-t", help="Target host or group from inventory"),
 ) -> None:
-    """Run `offlinectl apply` on targeted remote VMs via SSH."""
+    """Run zero-dependency remote apply on targeted VMs via SSH."""
     import shutil
+    import tempfile
 
     from offlinectl.inventory.loader import load_inventory, resolve_targets
+    from offlinectl.bundle.archive import detect_bundle
+    from offlinectl.manifest.loader import load_manifest
+    from offlinectl.plugins.registry import registry
 
-    if not shutil.which("ssh"):
+    if not bundle_path.exists():
+        err_console.print(f"[red]Error: Bundle path '{bundle_path}' does not exist.[/red]")
+        raise typer.Exit(1)
+
+    if not shutil.which("ssh") or not shutil.which("scp"):
         err_console.print(
-            "[red]Error: 'ssh' command requires native ssh utilities which are not available on this path.[/red]"
+            "[red]Error: 'ssh' and 'scp' commands are required on the jumphost.[/red]"
         )
         raise typer.Exit(1)
 
@@ -35,40 +43,102 @@ def apply_remote_cmd(
         err_console.print(f"[red]Error loading inventory or target: {e}[/red]")
         raise typer.Exit(1)
 
-    errors = []
+    # Generate apply.sh
+    try:
+        with detect_bundle(bundle_path) as actual_bundle_dir:
+            bundle_manifest = load_manifest(actual_bundle_dir / "bundle.yaml")
+            tasks = bundle_manifest.get_tasks()
 
-    for host_id, host in hosts:
-        console.print(
-            f"Applying bundle remotely on [bold cyan]{host_id}[/bold cyan] ({host.host})..."
-        )
+            script_lines = [
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                "",
+                "ARCHIVE=$1",
+                'BUNDLE_DEST=$(dirname "$ARCHIVE")',
+                'BUNDLE_DIR="$BUNDLE_DEST/extracted"',
+                "",
+                'echo "[offlinectl] Extracting bundle..."',
+                'mkdir -p "$BUNDLE_DIR"',
+                'tar -xf "$ARCHIVE" -C "$BUNDLE_DIR" --strip-components=1',
+                "",
+            ]
 
-        args = ["ssh"]
-        if host.ssh_key:
-            key_path = Path(host.ssh_key).expanduser()
-            args.extend(["-i", str(key_path)])
+            for task in tasks:
+                plugin = registry.get(task.plugin)
+                if hasattr(plugin, "render_apply_sh"):
+                    snippet = plugin.render_apply_sh(task.config, task.plugin)
+                    if snippet:
+                        script_lines.append(snippet)
+                else:
+                    err_console.print(
+                        f"[yellow]Warning: Plugin {task.plugin} does not support zero-dependency remote apply.[/yellow]"
+                    )
 
-        args.append(f"{host.user}@{host.host}")
-
-        # Build the exact remote command
-        # Ensure we join bundle_dest and bundle_filename safely.
-        bundle_full_dest = str(Path(host.bundle_dest) / bundle_filename)
-        remote_cmd = f"offlinectl apply {bundle_full_dest} --state-file {host.state_file}"
-        args.append(remote_cmd)
-
-        result = subprocess.run(args, capture_output=True, text=True)
-        if result.returncode != 0:
-            err_console.print(
-                f"[red]Failed to apply remotely on {host_id}. SSH exit code {result.returncode}[/red]"
-            )
-            err_console.print(f"[red]Stderr: {result.stderr}[/red]")
-            err_console.print(f"[red]Stdout: {result.stdout}[/red]")
-            errors.append(host_id)
-        else:
-            console.print(f"[green]Successfully applied on {host_id}.[/green]")
-            console.print(result.stdout)
-
-    if errors:
-        err_console.print(
-            f"[red]Remote apply completed with errors on {len(errors)} host(s).[/red]"
-        )
+            apply_sh_content = "\\n".join(script_lines)
+    except Exception as e:
+        err_console.print(f"[red]Error generating apply.sh: {e}[/red]")
         raise typer.Exit(1)
+
+    with tempfile.NamedTemporaryFile("w", delete=False, prefix="apply-", suffix=".sh") as f:
+        f.write(apply_sh_content)
+        apply_sh_local = f.name
+
+    try:
+        errors = []
+        for host_id, host in hosts:
+            console.print(
+                f"\\nApplying bundle remotely on [bold cyan]{host_id}[/bold cyan] ({host.host})..."
+            )
+
+            # 1. SCP the bundle and script
+            scp_args = ["scp"]
+            if host.ssh_key:
+                key_path = Path(host.ssh_key).expanduser()
+                scp_args.extend(["-i", str(key_path)])
+
+            dest = f"{host.user}@{host.host}:{host.bundle_dest}"
+            scp_args.extend([str(bundle_path), apply_sh_local, dest])
+
+            console.print(f"Transferring {bundle_path.name} and apply.sh to {host_id}...")
+            scp_res = subprocess.run(scp_args, capture_output=True, text=True)
+            if scp_res.returncode != 0:
+                err_console.print(f"[red]SCP failed: {scp_res.stderr}[/red]")
+                errors.append(host_id)
+                continue
+
+            # 2. SSH run
+            ssh_args = ["ssh"]
+            if host.ssh_key:
+                ssh_args.extend(["-i", str(key_path)])
+            ssh_args.append(f"{host.user}@{host.host}")
+
+            remote_bundle = f"{host.bundle_dest.rstrip('/')}/{bundle_path.name}"
+            remote_script = f"{host.bundle_dest.rstrip('/')}/{Path(apply_sh_local).name}"
+
+            remote_cmd = f"sudo bash {remote_script} {remote_bundle} && rm -f {remote_script}"
+            ssh_args.append(remote_cmd)
+
+            console.print(f"Running zero-dependency apply on {host_id}...")
+            with subprocess.Popen(
+                ssh_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            ) as proc:
+                if proc.stdout:
+                    for line in iter(proc.stdout.readline, ""):
+                        console.print(f"[dim]{host_id}:[/dim] {line.rstrip()}")
+                proc.wait()
+
+                if proc.returncode != 0:
+                    err_console.print(
+                        f"[red]Failed to apply remotely on {host_id}. SSH exit code {proc.returncode}[/red]"
+                    )
+                    errors.append(host_id)
+                else:
+                    console.print(f"[green]Successfully applied on {host_id}.[/green]")
+
+        if errors:
+            err_console.print(
+                f"\\n[red]Remote apply completed with errors on {len(errors)} host(s).[/red]"
+            )
+            raise typer.Exit(1)
+    finally:
+        Path(apply_sh_local).unlink(missing_ok=True)

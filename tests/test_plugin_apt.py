@@ -100,7 +100,7 @@ class TestAptPack:
         with patch("offlinectl.plugins.apt.subprocess.run", return_value=mock_result):
             plugin.pack({"packages": ["git"]}, pack_ctx)
 
-        assert (pack_ctx.bundle_dir / "apt" / "Packages").exists()
+        assert (pack_ctx.bundle_dir / "apt" / "debs" / "Packages").exists()
 
     def test_pack_creates_sources_list(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
         mock_result = MagicMock()

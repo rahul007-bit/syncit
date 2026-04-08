@@ -144,9 +144,9 @@ class AptPlugin(OfflinePlugin):
         # 3. Generate Packages index
         if ctx.verbose:
             rprint("[cyan]→[/] Generating Packages index...")
-        idx_cmd = ["dpkg-scanpackages", "debs", "/dev/null"]
-        idx_res = _run(idx_cmd, cwd=str(ctx.bundle_dir / "apt"))
-        packages_file = ctx.bundle_dir / "apt" / "Packages"
+        idx_cmd = ["dpkg-scanpackages", ".", "/dev/null"]
+        idx_res = _run(idx_cmd, cwd=str(ctx.bundle_dir / "apt" / "debs"))
+        packages_file = ctx.bundle_dir / "apt" / "debs" / "Packages"
         packages_file.write_text(idx_res.stdout)
 
         # 4. Write sources.list fragment
@@ -283,6 +283,19 @@ class AptPlugin(OfflinePlugin):
             updated=[],
             unchanged=sorted(old_set & new_set),
         )
+
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        packages = " ".join(task_spec.get("packages", []))
+        return f"""
+echo "[apt] Configuring local repository..."
+echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir}/debs ./" \\
+  | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
+sudo apt-get update \\
+  -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/offlinectl.list \\
+  -o Dir::Etc::sourcelistparts=/dev/null \\
+  -o APT::Get::List-Cleanup=0
+sudo apt-get install -y --no-install-recommends {packages}
+"""
 
 
 registry.register(AptPlugin())

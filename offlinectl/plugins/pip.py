@@ -278,5 +278,22 @@ class PipPlugin(OfflinePlugin):
             unchanged=[],
         )
 
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        return f"""
+echo "[pip] Installing wheels..."
+PIP_EXEC="pip3"
+if ! command -v pip3 &> /dev/null; then
+    if command -v pip &> /dev/null; then
+        PIP_EXEC="pip"
+    elif command -v python3 &> /dev/null; then
+        PIP_EXEC="python3 -m pip"
+    else
+        echo "[pip] ERROR: pip3 not found. Install python3-pip"
+        exit 1
+    fi
+fi
+$PIP_EXEC install --no-index --find-links=$BUNDLE_DIR/{bundle_subdir}/wheels -r $BUNDLE_DIR/{bundle_subdir}/requirements.txt
+"""
+
 
 registry.register(PipPlugin())

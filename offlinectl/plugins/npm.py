@@ -147,5 +147,15 @@ class NpmPlugin(OfflinePlugin):
             unchanged=[],
         )
 
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        lines = [f'echo "[npm] Applying node_modules..."']
+        for task in task_spec.get("projects", []):
+            proj_name = task["project_name"]
+            proj_dir = task["project_dir"]
+            lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{proj_name}/node_modules {proj_dir}/")
+            lines.append(f"echo 'offline=true' >> {proj_dir}/.npmrc")
+            lines.append(f"echo 'prefer-offline=true' >> {proj_dir}/.npmrc")
+        return "\\n".join(lines) + "\\n"
+
 
 registry.register(NpmPlugin())

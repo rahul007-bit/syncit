@@ -153,5 +153,17 @@ directory = "vendor"
             unchanged=[],
         )
 
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        lines = [f'echo "[cargo] Applying rust vendored dependencies..."']
+        for task in task_spec.get("projects", []):
+            proj_name = task["project_name"]
+            proj_dir = task["project_dir"]
+            lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{proj_name}/vendor {proj_dir}/vendor")
+            lines.append(f"mkdir -p {proj_dir}/.cargo")
+            lines.append(
+                f"cat $BUNDLE_DIR/{bundle_subdir}/{proj_name}/config.toml.snippet >> {proj_dir}/.cargo/config.toml"
+            )
+        return "\\n".join(lines) + "\\n"
+
 
 registry.register(CargoPlugin())

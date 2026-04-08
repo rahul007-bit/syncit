@@ -159,5 +159,22 @@ class DnfPlugin(OfflinePlugin):
             unchanged=[],
         )
 
+    def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        packages = " ".join(task_spec.get("packages", []))
+        return f"""
+echo "[dnf] Configuring local repository..."
+mkdir -p /srv/offline/dnf/rpms
+cp -r $BUNDLE_DIR/{bundle_subdir}/rpms/* /srv/offline/dnf/rpms/
+createrepo_c /srv/offline/dnf/rpms
+cat > /etc/yum.repos.d/offlinectl.repo << 'EOF'
+[offlinectl]
+name=Offlinectl Local Repo
+baseurl=file:///srv/offline/dnf/rpms
+enabled=1
+gpgcheck=0
+EOF
+dnf install -y {packages}
+"""
+
 
 registry.register(DnfPlugin())

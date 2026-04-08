@@ -1,8 +1,8 @@
-# offlinectl
+# syncit
 
 **Air-gap bundle orchestrator for Linux environments.**
 
-`offlinectl` lets you download all OS packages, Python wheels, and container images on an internet-connected machine, then apply them on an air-gapped VM — no proxy, no internet required.
+`syncit` lets you download all OS packages, Python wheels, and container images on an internet-connected machine, then apply them on an air-gapped VM — no proxy, no internet required.
 
 ---
 
@@ -20,7 +20,7 @@ pip install -e ".[dev]"
 
 ```yaml
 # bundle.yaml
-apiVersion: offlinectl/v1
+apiVersion: syncit/v1
 kind: Bundle
 metadata:
   name: my-env
@@ -49,15 +49,15 @@ spec:
 ### 3. Validate
 
 ```bash
-offlinectl validate bundle.yaml
+syncit validate bundle.yaml
 ```
 
 ### 4. Pack (on online VM)
 
 ```bash
-offlinectl pack bundle.yaml --output ./bundles/
+syncit pack bundle.yaml --output ./bundles/
 # Dry-run first:
-offlinectl pack bundle.yaml --output ./bundles/ --dry-run
+syncit pack bundle.yaml --output ./bundles/ --dry-run
 ```
 
 ### 5. Transfer the bundle
@@ -67,17 +67,17 @@ Copy the `bundles/bundle-my-env-1.0.0/` directory to the offline VM via USB, SCP
 ### 6. Apply (on offline VM)
 
 ```bash
-offlinectl apply ./bundles/bundle-my-env-1.0.0/
+syncit apply ./bundles/bundle-my-env-1.0.0/
 # Dry-run first:
-offlinectl apply ./bundles/bundle-my-env-1.0.0/ --dry-run
+syncit apply ./bundles/bundle-my-env-1.0.0/ --dry-run
 # Force re-apply even if already applied:
-offlinectl apply ./bundles/bundle-my-env-1.0.0/ --force
+syncit apply ./bundles/bundle-my-env-1.0.0/ --force
 ```
 
 ### 7. Diff two bundles
 
 ```bash
-offlinectl diff ./bundles/bundle-my-env-1.0.0/ ./bundles/bundle-my-env-2.0.0/
+syncit diff ./bundles/bundle-my-env-1.0.0/ ./bundles/bundle-my-env-2.0.0/
 ```
 
 ---
@@ -85,7 +85,7 @@ offlinectl diff ./bundles/bundle-my-env-1.0.0/ ./bundles/bundle-my-env-2.0.0/
 ## CLI Reference
 
 ```
-offlinectl --help
+syncit --help
 
 Commands:
   validate   Validate a bundle.yaml manifest file.
@@ -94,13 +94,13 @@ Commands:
   diff       Compare two bundle versions and show what changed.
 ```
 
-### `offlinectl validate <manifest>`
+### `syncit validate <manifest>`
 
 | Flag | Description |
 |------|-------------|
 | (positional) | Path to `bundle.yaml` |
 
-### `offlinectl pack <manifest>`
+### `syncit pack <manifest>`
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -109,17 +109,17 @@ Commands:
 | `--only` | all | Comma-separated plugin names to run |
 | `--verbose` / `-v` | false | Verbose output |
 
-### `offlinectl apply <bundle_dir>`
+### `syncit apply <bundle_dir>`
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--dry-run` | false | Show what would be applied |
 | `--force` | false | Re-apply even if state says done |
 | `--only` | all | Comma-separated plugin names |
-| `--state-file` | `/opt/offlinectl/state.json` | State file path |
+| `--state-file` | `/opt/syncit/state.json` | State file path |
 | `--continue-on-error` | false | Don't stop on plugin failure |
 
-### `offlinectl diff <bundle_v1> <bundle_v2>`
+### `syncit diff <bundle_v1> <bundle_v2>`
 
 Compares two bundle directories; prints `+` added, `-` removed, `~` updated per plugin.
 
@@ -169,7 +169,7 @@ pip install -e ".[dev]"
 pytest
 
 # Lint
-ruff check offlinectl/ tests/
+ruff check syncit/ tests/
 ```
 
 ### Requirements

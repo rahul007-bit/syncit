@@ -18,17 +18,17 @@ python3 -m pytest tests/test_plugin_pip.py
 ```
 
 ### CLI Usage
-The tool is implemented using Typer. Run via `python3 -m offlinectl.main` or install via `pip install .` and use `offlinectl`.
+The tool is implemented using Typer. Run via `python3 -m offlinectl.main` or install via `pip install .` and use `syncit`.
 
 Common commands:
-- `offlinectl validate <manifest>`: Validate `bundle.yaml` and plugin specs.
-- `offlinectl pack <manifest> [--output DIR] [--dry-run]`: Resolve and download dependencies.
-- `offlinectl apply <bundle_dir> [--dry-run] [--force]`: Install bundle artifacts on air-gapped host.
-- `offlinectl diff <bundle_v1> <bundle_v2>`: Compare two bundles.
+- `syncit validate <manifest>`: Validate `bundle.yaml` and plugin specs.
+- `syncit pack <manifest> [--output DIR] [--dry-run]`: Resolve and download dependencies.
+- `syncit apply <bundle_dir> [--dry-run] [--force]`: Install bundle artifacts on air-gapped host.
+- `syncit diff <bundle_v1> <bundle_v2>`: Compare two bundles.
 
 ## Architecture
 
-`offlinectl` follows a plugin-based orchestration architecture to handle different package ecosystems (apt, pip, oci_image).
+`syncit` follows a plugin-based orchestration architecture to handle different package ecosystems (apt, pip, oci_image).
 
 ### Core Flow
 1. **Manifest**: `manifest/schema.py` defines the Pydantic model for `bundle.yaml`.

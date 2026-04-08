@@ -8,6 +8,7 @@ from rich.console import Console
 from offlinectl.commands.apply import apply_cmd
 from offlinectl.commands.apply_remote import apply_remote_cmd
 from offlinectl.commands.diff import diff_cmd
+from offlinectl.commands.exec_cmd import exec_cmd
 from offlinectl.commands.pack import pack_cmd
 from offlinectl.commands.transfer import transfer_cmd
 from offlinectl.commands.validate import validate_cmd
@@ -53,6 +54,7 @@ app.command("transfer", help="Transfer a bundle to offline VMs via SCP.")(transf
 app.command("apply-remote", help="Run zero-dependency remote apply via SSH snippet.")(
     apply_remote_cmd
 )
+app.command("exec", help="Run a shell command on remote hosts via SSH.")(exec_cmd)
 
 
 if __name__ == "__main__":

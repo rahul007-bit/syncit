@@ -249,3 +249,26 @@ class TestAptDiff:
         assert result.added == []
         assert result.removed == []
         assert set(result.unchanged) == {"git", "curl"}
+
+
+# --------------------------------------------------------------------------- #
+# render_apply_sh()                                                             #
+# --------------------------------------------------------------------------- #
+
+
+class TestAptRenderApplySh:
+    def test_render_apply_sh_contains_isolation_flags(self, plugin: AptPlugin) -> None:
+        snippet = plugin.render_apply_sh({"packages": ["curl", "git"]}, "apt")
+
+        # Verify update command has isolation
+        assert "apt-get update" in snippet
+        assert "-o Dir::Etc::SourceList=" in snippet.split("apt-get update")[1].split("apt-get install")[0]
+        assert "-o Dir::Etc::SourceParts=\"/dev/null\"" in snippet
+
+        # Verify install command has isolation
+        assert "apt-get install" in snippet
+        assert "-o Dir::Etc::SourceList=" in snippet.split("apt-get install")[1]
+
+        # Verify no system paths used for sources
+        assert "/etc/apt/sources.list.d/" not in snippet
+        assert "SOURCES_FILE=\"$BUNDLE_DIR/apt/offlinectl.list\"" in snippet

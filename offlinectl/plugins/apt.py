@@ -301,28 +301,26 @@ class AptPlugin(OfflinePlugin):
 
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         packages = " ".join(task_spec.get("packages", []))
-        # The canonical location for the Packages index is always inside debs/
         return f"""
-echo "[apt] Configuring local repository..."
-REPO_PATH="$BUNDLE_DIR/{bundle_subdir}/debs"
-if [ ! -f "$REPO_PATH/Packages" ]; then
-  echo "[apt] ERROR: Packages index not found at $REPO_PATH/Packages"
-  ls -la "$BUNDLE_DIR/{bundle_subdir}/" || true
-  exit 1
-fi
+echo "[apt] Configuring isolated local repository..."
+SOURCES_FILE="$BUNDLE_DIR/{bundle_subdir}/offlinectl.list"
+echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir}/debs ./" > "$SOURCES_FILE"
 
-cat <<SOURCES_EOF | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
-deb [trusted=yes] file://$REPO_PATH ./
-SOURCES_EOF
-
-echo "[apt] Updating package list..."
+echo "[apt] Updating package index (local only)..."
 sudo apt-get update \\
-  -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/offlinectl.list \\
-  -o Dir::Etc::sourcelistparts=/dev/null \\
+  -o Dir::Etc::SourceList="$SOURCES_FILE" \\
+  -o Dir::Etc::SourceParts="/dev/null" \\
+  -o Dir::Etc::Preferences="/dev/null" \\
+  -o Dir::Etc::PreferencesParts="/dev/null" \\
   -o APT::Get::List-Cleanup=0
 
 echo "[apt] Installing packages..."
-sudo apt-get install -y --no-install-recommends {packages}
+sudo apt-get install -y --no-install-recommends \\
+  -o Dir::Etc::SourceList="$SOURCES_FILE" \\
+  -o Dir::Etc::SourceParts="/dev/null" \\
+  -o Dir::Etc::Preferences="/dev/null" \\
+  -o Dir::Etc::PreferencesParts="/dev/null" \\
+  {packages}
 """
 
 

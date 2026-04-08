@@ -144,19 +144,34 @@ class AptPlugin(OfflinePlugin):
         # 3. Generate Packages index
         if ctx.verbose:
             rprint("[cyan]→[/] Generating Packages index...")
-        idx_cmd = ["dpkg-scanpackages", ".", "/dev/null"]
-        idx_res = _run(idx_cmd, cwd=str(ctx.bundle_dir / "apt" / "debs"))
-        packages_file = ctx.bundle_dir / "apt" / "debs" / "Packages"
-        packages_file.write_text(idx_res.stdout)
+        
+        packages_file = deb_dir / "Packages"
+        sources_file = ctx.bundle_dir / "apt" / "sources.list"
+        codename_file = ctx.bundle_dir / "apt" / "pack_codename"
 
-        # 4. Write sources.list fragment
+        idx_cmd = ["dpkg-scanpackages", ".", "/dev/null"]
+        idx_res = _run(idx_cmd, cwd=str(deb_dir))
+        
+        if idx_res.returncode != 0:
+            errors.append(f"[apt] dpkg-scanpackages failed: {idx_res.stderr.strip()}")
+        elif not idx_res.stdout.strip():
+            # If we resolved packages but scanpackages found nothing, that's an error
+            if all_pkgs:
+                errors.append("[apt] dpkg-scanpackages produced empty index despite finding packages. Ensure .deb files were downloaded.")
+        else:
+            packages_file.write_text(idx_res.stdout)
+            # Standard practice: provide gzip version too
+            import gzip
+            with gzip.open(str(deb_dir / "Packages.gz"), "wt") as f:
+                f.write(idx_res.stdout)
+
+        # 4. Write sources.list fragment (primarily for local apply)
         if ctx.verbose:
             rprint("[cyan]→[/] Writing sources.list...")
-        sources_file = ctx.bundle_dir / "apt" / "sources.list"
-        sources_file.write_text("deb [trusted=yes] file:///srv/offline/apt ./\n")
+        # Using a relative path that local apply can resolve or override
+        sources_file.write_text("deb [trusted=yes] file://./debs ./\n")
 
         # 5. Record target codename for mismatch warning on apply
-        codename_file = ctx.bundle_dir / "apt" / "pack_codename"
         codename_file.write_text(_detect_codename())
 
         artifacts = [str(deb_dir), str(packages_file), str(sources_file)]

@@ -63,9 +63,20 @@ def apply_remote_cmd(
                 'BUNDLE_DEST=$(dirname "$ARCHIVE")',
                 'BUNDLE_DIR="$BUNDLE_DEST/extracted"',
                 "",
-                'echo "[offlinectl] Extracting bundle..."',
+                'echo "[offlinectl] Extracting bundle archive..."',
                 'mkdir -p "$BUNDLE_DIR"',
-                'tar -xf "$ARCHIVE" -C "$BUNDLE_DIR" --strip-components=1',
+                'tar -xf "$ARCHIVE" -C "$BUNDLE_DIR"',
+                '# Normalize structure: if there is only one directory in the root, move its contents up',
+                'DIR_COUNT=$(ls -1 "$BUNDLE_DIR" | wc -l)',
+                'if [ "$DIR_COUNT" -eq 1 ] && [ -d "$BUNDLE_DIR"/* ]; then',
+                '  SUBDIR=$(ls -1 "$BUNDLE_DIR")',
+                '  echo "[offlinectl] Normalizing bundle structure (found top-level \'$SUBDIR\')..."',
+                '  mv "$BUNDLE_DIR/$SUBDIR"/* "$BUNDLE_DIR/" 2>/dev/null || true',
+                '  mv "$BUNDLE_DIR/$SUBDIR"/.[!.]* "$BUNDLE_DIR/" 2>/dev/null || true',
+                '  rmdir "$BUNDLE_DIR/$SUBDIR"',
+                'fi',
+                '# Debug: list extracted contents if it fails later',
+                'trap \'if [ $? -ne 0 ]; then echo "[offlinectl] DEBUG: Extracted bundle structure:"; ls -R "$BUNDLE_DIR"; fi\' EXIT',
                 "",
             ]
 
@@ -142,6 +153,10 @@ def apply_remote_cmd(
                     err_console.print(
                         f"[red]Failed to apply remotely on {host_id}. SSH exit code {proc.returncode}[/red]"
                     )
+                    # If it failed with 127 it means bash couldn't find a command or we are hitting 
+                    # the old code that tried to run 'offlinectl'.
+                    if proc.returncode == 127:
+                         err_console.print("[yellow]Hint: If you see 'offlinectl: command not found', ensure you are using 'uv run offlinectl' on the jumphost to run the latest code.[/yellow]")
                     errors.append(host_id)
                     host_failed = True
                 else:

@@ -425,7 +425,7 @@ def test_apply_remote_print_script(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "#!/usr/bin/env bash" in result.output
-    assert "Extracting bundle..." in result.output
+    assert "Extracting bundle archive..." in result.output
     
     # Should be no network interaction
     mock_run.assert_not_called()

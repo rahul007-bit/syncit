@@ -319,14 +319,22 @@ else
   exit 1
 fi
 
-echo "deb [trusted=yes] file://$REPO_PATH ./" \\
-  | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
+# Create a self-contained sources.list for this apply
+cat <<EOF > "$BUNDLE_DIR/{bundle_subdir}/temp_sources.list"
+deb [trusted=yes] file://$REPO_PATH ./
+EOF
 
+echo "[apt] Updating package lists (strictly offline)..."
 sudo apt-get update \\
-  -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/offlinectl.list \\
+  -o Dir::Etc::sourcelist="$BUNDLE_DIR/{bundle_subdir}/temp_sources.list" \\
   -o Dir::Etc::sourcelistparts=/dev/null \\
   -o APT::Get::List-Cleanup=0
-sudo apt-get install -y --no-install-recommends {packages}
+
+echo "[apt] Installing packages..."
+sudo apt-get install -y --no-install-recommends \\
+  -o Dir::Etc::sourcelist="$BUNDLE_DIR/{bundle_subdir}/temp_sources.list" \\
+  -o Dir::Etc::sourcelistparts=/dev/null \\
+  {packages}
 """
 
 

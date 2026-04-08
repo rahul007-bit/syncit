@@ -1,0 +1,25 @@
+apiVersion: offlinectl/v1
+kind: Bundle
+metadata:
+  name: ubuntu-smoke-test
+  version: "1.0.0"
+  description: "Smoke test for real Ubuntu VM"
+
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+
+  tasks:
+    - name: Install base tools
+      plugin: apt
+      packages:
+        - curl
+        - git
+        - htop
+
+    - name: Install Python deps
+      plugin: pip
+      python_version: "3.12"
+      requirements: ./requirements.test.txt

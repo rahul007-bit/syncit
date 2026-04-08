@@ -41,6 +41,7 @@ ignore = ["E501"]
 [dependency-groups]
 dev = [
     "mypy>=1.20.0",
+    "pyinstaller>=6.19.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.15.9",
     "types-pyyaml>=6.0.12.20250915",

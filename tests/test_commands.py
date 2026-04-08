@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -21,9 +21,11 @@ def test_main_version() -> None:
 
 
 def test_validate_valid_manifest(bundle_yaml: Path) -> None:
-    # Ensure offlinectl/plugins/oci_image._has_cmd returns True to pass validation step if it executes it
     with patch("offlinectl.plugins.oci_image._has_cmd", return_value=True):
-        result = runner.invoke(app, ["validate", str(bundle_yaml)])
+        with patch("shutil.which", return_value="fake_path"):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)
+                result = runner.invoke(app, ["validate", str(bundle_yaml)])
     assert result.exit_code == 0
     assert "OK" in result.stdout
 

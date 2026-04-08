@@ -33,20 +33,30 @@ def apply_ctx(tmp_bundle_dir: Path, tmp_state_file: Path) -> ApplyContext:
 
 class TestAptValidate:
     def test_valid_spec_returns_no_errors(self, plugin: AptPlugin) -> None:
-        assert plugin.validate({"packages": ["git", "curl"]}) == []
+        with patch("shutil.which", return_value="path"):
+            assert plugin.validate({"packages": ["git", "curl"]}) == []
+
+    def test_missing_dpkg_scanpackages(self, plugin: AptPlugin) -> None:
+        with patch("shutil.which", return_value=None):
+            errors = plugin.validate({"packages": ["git"]})
+            assert len(errors) == 1
+            assert "dpkg-scanpackages" in errors[0]
 
     def test_missing_packages_returns_error(self, plugin: AptPlugin) -> None:
-        errors = plugin.validate({})
-        assert len(errors) == 1
-        assert "packages" in errors[0]
+        with patch("shutil.which", return_value="path"):
+            errors = plugin.validate({})
+            assert len(errors) == 1
+            assert "packages" in errors[0]
 
     def test_empty_packages_list_returns_error(self, plugin: AptPlugin) -> None:
-        errors = plugin.validate({"packages": []})
-        assert len(errors) >= 1
+        with patch("shutil.which", return_value="path"):
+            errors = plugin.validate({"packages": []})
+            assert len(errors) >= 1
 
     def test_packages_not_list_returns_error(self, plugin: AptPlugin) -> None:
-        errors = plugin.validate({"packages": "git"})
-        assert len(errors) >= 1
+        with patch("shutil.which", return_value="path"):
+            errors = plugin.validate({"packages": "git"})
+            assert len(errors) >= 1
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +114,39 @@ class TestAptPack:
         sources = (pack_ctx.bundle_dir / "apt" / "sources.list").read_text()
         assert "file://" in sources
         assert "trusted=yes" in sources
+
+    def test_pack_filters_virtual_packages(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = """
+  Depends: libc6
+  Depends: debconf-2.0>
+  Depends: perl:any>
+  Depends: <virtual-pkg>
+ |Depends: some-or-pkg
+  Depends: real-pkg (> 1.0)
+"""
+        mock_result.stderr = ""
+
+        with patch("offlinectl.plugins.apt.subprocess.run") as mock_run:
+
+            def side_effect(cmd, **kwargs):
+                if cmd[0] == "apt-cache":
+                    return mock_result
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = side_effect
+
+            plugin.pack({"packages": ["custom"]}, pack_ctx)
+
+        # Expected downloads: custom, libc6, real-pkg
+        downloads = []
+        for call in mock_run.call_args_list:
+            args = call.args[0]
+            if args[0] == "apt-get" and args[1] == "download":
+                downloads.append(args[2])
+
+        assert set(downloads) == {"custom", "libc6"}
 
 
 # --------------------------------------------------------------------------- #

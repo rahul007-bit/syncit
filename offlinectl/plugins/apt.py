@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -45,6 +46,10 @@ class AptPlugin(OfflinePlugin):
 
     def validate(self, task_spec: dict[str, Any]) -> list[str]:
         errors: list[str] = []
+        if not shutil.which("dpkg-scanpackages"):
+            errors.append(
+                "[apt] Error: 'dpkg-scanpackages' not found — install dpkg-dev (sudo apt-get install dpkg-dev)"
+            )
         packages = task_spec.get("packages")
         if not packages or not isinstance(packages, list):
             errors.append("[apt] 'packages' must be a non-empty list")
@@ -94,12 +99,18 @@ class AptPlugin(OfflinePlugin):
             all_pkgs.add(pkg)
             for line in dep_res.stdout.splitlines():
                 line = line.strip()
-                if line.startswith("Depends:"):
-                    dep = line.removeprefix("Depends:").strip()
-                    # Strip version constraints e.g. "libc6 (>= 2.17)"
-                    dep_name = dep.split()[0].lstrip("<>!")
-                    if dep_name and not dep_name.startswith("{"):
-                        all_pkgs.add(dep_name)
+                if ">" in line or "<" in line:
+                    continue
+                if line.startswith("|"):
+                    continue
+                if ":any" in line or ":native" in line:
+                    continue
+                line = line.removeprefix("Depends:").removeprefix("PreDepends:").strip()
+                if not line:
+                    continue
+                name = line.split()[0]
+                if re.match(r"^[a-z0-9][a-z0-9.+\-]+$", name):
+                    all_pkgs.add(name)
 
         if not all_pkgs and errors:
             return PluginResult(

@@ -23,11 +23,25 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
+def _pip_executable() -> list[str]:
+    if shutil.which("pip3"):
+        return ["pip3"]
+    if shutil.which("pip"):
+        return ["pip"]
+    return [sys.executable, "-m", "pip"]
+
+
 class PipPlugin(OfflinePlugin):
     name = "pip"
 
     def validate(self, task_spec: dict[str, Any]) -> list[str]:
         errors: list[str] = []
+        if not shutil.which("pip3") and not shutil.which("pip"):
+            res = _run([sys.executable, "-m", "pip", "--version"])
+            if res.returncode != 0:
+                errors.append(
+                    "[pip] Error: pip is not available (tried pip3, pip, and python3 -m pip)."
+                )
         if "requirements" not in task_spec and "pyproject" not in task_spec:
             errors.append("[pip] Task spec must contain either 'requirements' or 'pyproject' path")
         for field in ("requirements", "pyproject", "python_version"):
@@ -74,7 +88,7 @@ class PipPlugin(OfflinePlugin):
 
         # First attempt: binary-only (preferred for air-gap compatibility)
         cmd = [
-            "pip",
+            *_pip_executable(),
             "download",
             "-r",
             str(req_path),
@@ -149,7 +163,7 @@ class PipPlugin(OfflinePlugin):
 
         # 3. Idempotence: parse currently installed packages
         installed: dict[str, str] = {}
-        list_res = _run(["pip", "list", "--format=json"])
+        list_res = _run([*_pip_executable(), "list", "--format=json"])
         if list_res.returncode == 0:
             try:
                 for entry in json.loads(list_res.stdout):
@@ -159,7 +173,7 @@ class PipPlugin(OfflinePlugin):
 
         # 4. Install from local wheelhouse
         install_cmd = [
-            "pip",
+            *_pip_executable(),
             "install",
             "--no-index",
             "--find-links",

@@ -34,6 +34,7 @@ class TaskSpec(BaseModel):
 
 class BundleSpec(BaseModel):
     targets: TargetSpec
+    roles: list[dict[str, Any]] = Field(default_factory=list)
     tasks: list[dict[str, Any]] = Field(default_factory=list)
 
 

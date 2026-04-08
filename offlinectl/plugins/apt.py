@@ -76,6 +76,11 @@ class AptPlugin(OfflinePlugin):
         all_pkgs: set[str] = set()
 
         # 1. Resolve recursive dependencies for each package
+        if ctx.verbose:
+            from rich import print as rprint
+
+            rprint(f"[cyan]→[/] Resolving dependencies for: {' '.join(packages)}...")
+
         for pkg in packages:
             dep_cmd = [
                 "apt-cache",
@@ -117,8 +122,15 @@ class AptPlugin(OfflinePlugin):
                 success=False, message="Dependency resolution failed", artifacts=[], errors=errors
             )
 
+        sorted_pkgs = sorted(list(all_pkgs))
+        total_dl = len(sorted_pkgs)
+        if ctx.verbose:
+            rprint(f"[cyan]→[/] Resolved {total_dl} packages (including transitive deps)")
+
         # 2. Download all resolved packages
-        for p in sorted(all_pkgs):
+        for i, p in enumerate(sorted_pkgs, start=1):
+            if ctx.verbose:
+                rprint(f"[cyan]→[/] Downloading: {p} ({i}/{total_dl})...")
             dl_cmd = ["apt-get", "download", p]
             dl_res = _run(dl_cmd, cwd=str(deb_dir))
             if dl_res.returncode != 0:
@@ -130,12 +142,16 @@ class AptPlugin(OfflinePlugin):
                 # Non-fatal: continue downloading others
 
         # 3. Generate Packages index
+        if ctx.verbose:
+            rprint("[cyan]→[/] Generating Packages index...")
         idx_cmd = ["dpkg-scanpackages", "debs", "/dev/null"]
         idx_res = _run(idx_cmd, cwd=str(ctx.bundle_dir / "apt"))
         packages_file = ctx.bundle_dir / "apt" / "Packages"
         packages_file.write_text(idx_res.stdout)
 
         # 4. Write sources.list fragment
+        if ctx.verbose:
+            rprint("[cyan]→[/] Writing sources.list...")
         sources_file = ctx.bundle_dir / "apt" / "sources.list"
         sources_file.write_text("deb [trusted=yes] file:///srv/offline/apt ./\n")
 
@@ -145,6 +161,9 @@ class AptPlugin(OfflinePlugin):
 
         artifacts = [str(deb_dir), str(packages_file), str(sources_file)]
         success = len(errors) == 0
+        if ctx.verbose and success:
+            rprint(f"[green]✓[/] apt: {total_dl} packages downloaded")
+
         msg = "apt packed successfully" if success else f"apt packed with {len(errors)} error(s)"
         return PluginResult(success=success, message=msg, artifacts=artifacts, errors=errors)
 

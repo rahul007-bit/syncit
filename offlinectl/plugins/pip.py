@@ -24,11 +24,17 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 def _pip_executable() -> list[str]:
-    if shutil.which("pip3"):
-        return ["pip3"]
-    if shutil.which("pip"):
-        return ["pip"]
-    return [sys.executable, "-m", "pip"]
+    # Always prefer system pip3/pip — never use sys.executable
+    for candidate in ["pip3", "pip"]:
+        if shutil.which(candidate):
+            return [candidate]
+    # Last resort: find system python3 (not sys.executable) and use its -m pip
+    python3 = shutil.which("python3")
+    if python3:
+        result = subprocess.run([python3, "-m", "pip", "--version"], capture_output=True)
+        if result.returncode == 0:
+            return [python3, "-m", "pip"]
+    raise RuntimeError("pip not found — install pip3: sudo apt-get install python3-pip")
 
 
 class PipPlugin(OfflinePlugin):
@@ -36,12 +42,10 @@ class PipPlugin(OfflinePlugin):
 
     def validate(self, task_spec: dict[str, Any]) -> list[str]:
         errors: list[str] = []
-        if not shutil.which("pip3") and not shutil.which("pip"):
-            res = _run([sys.executable, "-m", "pip", "--version"])
-            if res.returncode != 0:
-                errors.append(
-                    "[pip] Error: pip is not available (tried pip3, pip, and python3 -m pip)."
-                )
+        try:
+            _pip_executable()
+        except RuntimeError as e:
+            errors.append(f"[pip] {e}")
         if "requirements" not in task_spec and "pyproject" not in task_spec:
             errors.append("[pip] Task spec must contain either 'requirements' or 'pyproject' path")
         for field in ("requirements", "pyproject", "python_version"):
@@ -98,7 +102,28 @@ class PipPlugin(OfflinePlugin):
             "--dest",
             str(wheel_dir),
         ]
-        result = _run(cmd)
+
+        def do_run(run_cmd: list[str]) -> subprocess.CompletedProcess:
+            if ctx.verbose:
+                from rich import print as rprint
+
+                rprint(f"[cyan]→[/] Running: {' '.join(run_cmd)}")
+                output = []
+                with subprocess.Popen(
+                    run_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                ) as proc:
+                    if proc.stdout:
+                        for line in iter(proc.stdout.readline, ""):
+                            output.append(line)
+                            rprint(f"[cyan]→[/] {line.rstrip()}")
+                proc.wait()
+                return subprocess.CompletedProcess(
+                    args=run_cmd, returncode=proc.returncode, stdout="".join(output), stderr=""
+                )
+            else:
+                return _run(run_cmd)
+
+        result = do_run(cmd)
 
         if result.returncode != 0:
             # Retry without --only-binary, warn user
@@ -108,7 +133,7 @@ class PipPlugin(OfflinePlugin):
                 file=sys.stderr,
             )
             cmd_retry = [c for c in cmd if c != "--only-binary=:all:"]
-            result = _run(cmd_retry)
+            result = do_run(cmd_retry)
             if result.returncode != 0:
                 return PluginResult(
                     success=False,
@@ -122,6 +147,10 @@ class PipPlugin(OfflinePlugin):
         shutil.copy2(str(req_path), str(bundle_req))
 
         artifacts = [str(wheel_dir), str(bundle_req)]
+        if ctx.verbose:
+            from rich import print as rprint
+
+            rprint("[green]✓[/] pip: wheels downloaded")
         return PluginResult(
             success=True,
             message="[pip] Wheels downloaded successfully",
@@ -181,7 +210,28 @@ class PipPlugin(OfflinePlugin):
             "-r",
             str(target_req_file),
         ]
-        result = _run(install_cmd)
+
+        def do_run_install(run_cmd: list[str]) -> subprocess.CompletedProcess:
+            if ctx.verbose:
+                from rich import print as rprint
+
+                rprint(f"[cyan]→[/] Running: {' '.join(run_cmd)}")
+                output = []
+                with subprocess.Popen(
+                    run_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                ) as proc:
+                    if proc.stdout:
+                        for line in iter(proc.stdout.readline, ""):
+                            output.append(line)
+                            rprint(f"[cyan]→[/] {line.rstrip()}")
+                proc.wait()
+                return subprocess.CompletedProcess(
+                    args=run_cmd, returncode=proc.returncode, stdout="".join(output), stderr=""
+                )
+            else:
+                return _run(run_cmd)
+
+        result = do_run_install(install_cmd)
         if result.returncode != 0:
             return PluginResult(
                 success=False,
@@ -189,6 +239,11 @@ class PipPlugin(OfflinePlugin):
                 artifacts=[],
                 errors=[result.stderr],
             )
+
+        if ctx.verbose:
+            from rich import print as rprint
+
+            rprint("[green]✓[/] pip: packages installed")
 
         return PluginResult(
             success=True,

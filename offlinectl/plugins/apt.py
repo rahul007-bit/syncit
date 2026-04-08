@@ -311,7 +311,7 @@ if [ ! -f "$REPO_PATH/Packages" ]; then
   exit 1
 fi
 
-cat <<'SOURCES_EOF' | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
+cat <<SOURCES_EOF | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
 deb [trusted=yes] file://$REPO_PATH ./
 SOURCES_EOF
 

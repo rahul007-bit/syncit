@@ -159,17 +159,10 @@ class AptPlugin(OfflinePlugin):
             if all_pkgs:
                 errors.append("[apt] dpkg-scanpackages produced empty index despite finding packages. Ensure .deb files were downloaded.")
         else:
-            # Write index to the debs/ directory (standard flat repo)
+            # Write the package index canonically inside debs/ (so the path is the same as the files)
             packages_file.write_text(idx_res.stdout)
-            
-            # Write index to the parent directory as well for redundancy
-            (ctx.bundle_dir / "apt" / "Packages").write_text(idx_res.stdout)
-            
-            # Standard practice: provide gzip version too
             import gzip
             with gzip.open(str(deb_dir / "Packages.gz"), "wt") as f:
-                f.write(idx_res.stdout)
-            with gzip.open(str(ctx.bundle_dir / "apt" / "Packages.gz"), "wt") as f:
                 f.write(idx_res.stdout)
 
         # 4. Write sources.list fragment (primarily for local apply)
@@ -308,33 +301,28 @@ class AptPlugin(OfflinePlugin):
 
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         packages = " ".join(task_spec.get("packages", []))
+        # The canonical location for the Packages index is always inside debs/
         return f"""
 echo "[apt] Configuring local repository..."
-if [ -f "$BUNDLE_DIR/{bundle_subdir}/debs/Packages" ]; then
-  REPO_PATH="$BUNDLE_DIR/{bundle_subdir}/debs"
-elif [ -f "$BUNDLE_DIR/{bundle_subdir}/Packages" ]; then
-  REPO_PATH="$BUNDLE_DIR/{bundle_subdir}"
-else
-  echo "[apt] ERROR: Could not find Packages index in $BUNDLE_DIR/{bundle_subdir}"
+REPO_PATH="$BUNDLE_DIR/{bundle_subdir}/debs"
+if [ ! -f "$REPO_PATH/Packages" ]; then
+  echo "[apt] ERROR: Packages index not found at $REPO_PATH/Packages"
+  ls -la "$BUNDLE_DIR/{bundle_subdir}/" || true
   exit 1
 fi
 
-# Create a self-contained sources.list for this apply
-cat <<EOF > "$BUNDLE_DIR/{bundle_subdir}/temp_sources.list"
+cat <<'SOURCES_EOF' | sudo tee /etc/apt/sources.list.d/offlinectl.list > /dev/null
 deb [trusted=yes] file://$REPO_PATH ./
-EOF
+SOURCES_EOF
 
-echo "[apt] Updating package lists (strictly offline)..."
+echo "[apt] Updating package list..."
 sudo apt-get update \\
-  -o Dir::Etc::sourcelist="$BUNDLE_DIR/{bundle_subdir}/temp_sources.list" \\
+  -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/offlinectl.list \\
   -o Dir::Etc::sourcelistparts=/dev/null \\
   -o APT::Get::List-Cleanup=0
 
 echo "[apt] Installing packages..."
-sudo apt-get install -y --no-install-recommends \\
-  -o Dir::Etc::sourcelist="$BUNDLE_DIR/{bundle_subdir}/temp_sources.list" \\
-  -o Dir::Etc::sourcelistparts=/dev/null \\
-  {packages}
+sudo apt-get install -y --no-install-recommends {packages}
 """
 
 

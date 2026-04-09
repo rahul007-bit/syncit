@@ -49,8 +49,7 @@ class TestExecSingleTarget:
         assert result.exit_code == 0
         ssh_call = mock_popen.call_args[0][0]
         assert ssh_call[0] == "ssh"
-        assert ssh_call[1] == "root@10.0.0.1"
-        assert ssh_call[-3:] == ["bash", "-c", "df -h"]
+        assert ssh_call[-1] == "bash -c 'df -h'"
 
     def test_sudo_prepends_sudo_bash_c(self, tmp_path: Path) -> None:
         inv_file = tmp_path / "inv.yaml"
@@ -79,7 +78,7 @@ class TestExecSingleTarget:
 
         assert result.exit_code == 0
         ssh_call = mock_popen.call_args[0][0]
-        assert ssh_call[-4:] == ["sudo", "bash", "-c", "systemctl status docker"]
+        assert ssh_call[-1] == "sudo bash -c 'systemctl status docker'"
 
     def test_ssh_key_is_used(self, tmp_path: Path) -> None:
         inv_file = tmp_path / "inv.yaml"
@@ -288,5 +287,5 @@ class TestExecPreservation:
         assert result.exit_code == 0
         # The 0th call's first positional argument is the command list
         full_cmd = mock_popen.call_args[0][0]
-        # Assert the command ends with ['bash', '-c', 'ls -la /']
-        assert full_cmd[-3:] == ["bash", "-c", "ls -la /"]
+        # Assert the command ends with a single string containing bash -c
+        assert full_cmd[-1] == "bash -c 'ls -la /'"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -76,9 +77,11 @@ def exec_cmd(
 
     def run_on_host(host_id: str, host_obj: "Host") -> None:  # type: ignore[name-defined]
         ssh_base = _build_ssh_base(host_obj)
-        cmd_str = " ".join(command)
-        remote_cmd = ["sudo", "bash", "-c", cmd_str] if sudo else ["bash", "-c", cmd_str]
-        full_cmd = ssh_base + remote_cmd
+        user_cmd = " ".join(command)
+        remote_cmd = (
+            f"sudo bash -c {shlex.quote(user_cmd)}" if sudo else f"bash -c {shlex.quote(user_cmd)}"
+        )
+        full_cmd = ssh_base + [remote_cmd]
 
         try:
             # Popen with combined stdout/stderr for line-by-line streaming

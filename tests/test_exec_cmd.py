@@ -263,3 +263,30 @@ class TestExecFailure:
         assert "✓" in result.output
         assert "[h1]" in result.output
         assert "[h2]" in result.output
+
+
+class TestExecPreservation:
+    def test_command_with_flags_is_preserved(self, tmp_path: Path) -> None:
+        inv_file = tmp_path / "inv.yaml"
+        inv_file.write_text("hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n")
+
+        with patch("subprocess.Popen") as mock_popen:
+
+            def factory(*args, **kwargs):
+                m = MagicMock()
+                m.stdout.readline.side_effect = [""]
+                m.wait.return_value = 0
+                m.returncode = 0
+                return m
+
+            mock_popen.side_effect = factory
+            result = runner.invoke(
+                app,
+                ["exec", "-i", str(inv_file), "--all", "--", "ls", "-la", "/"],
+            )
+
+        assert result.exit_code == 0
+        # The 0th call's first positional argument is the command list
+        full_cmd = mock_popen.call_args[0][0]
+        # Assert the command ends with ['bash', '-c', 'ls -la /']
+        assert full_cmd[-3:] == ["bash", "-c", "ls -la /"]

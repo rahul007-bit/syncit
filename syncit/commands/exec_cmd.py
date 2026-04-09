@@ -19,17 +19,21 @@ from typing import List
 def exec_cmd(
     command: List[str] = typer.Argument(
         ...,
-        help="Command to run. Use '--' before the command if it contains flags (e.g., syncit exec -i inv.yaml --all -- ls -l)",
+        help="Command to run. Use '--' before the command if it contains flags (e.g., syncit exec -i inv.yaml --all -- ls -la /)",
     ),
-    inventory: Path = typer.Option(..., "-i", "--inventory"),
-    target: str | None = typer.Option(None, "-t", "--target"),
-    group: str | None = typer.Option(None, "-g", "--group"),
-    all_hosts: bool = typer.Option(False, "--all"),
-    sudo: bool = typer.Option(False, "--sudo"),
-    timeout: int = typer.Option(30, "--timeout"),
+    inventory: Path = typer.Option(..., "-i", "--inventory", help="Path to inventory YAML file"),
+    target: str | None = typer.Option(None, "-t", "--target", help="Target host from inventory"),
+    group: str | None = typer.Option(None, "-g", "--group", help="Target group from inventory"),
+    all_hosts: bool = typer.Option(False, "--all", help="Execute on all hosts in inventory"),
+    sudo: bool = typer.Option(False, "--sudo", help="Run command with sudo on remote hosts"),
+    timeout: int = typer.Option(30, "--timeout", help="SSH timeout in seconds"),
 ) -> None:
     """Run an arbitrary shell command on remote hosts via SSH."""
     from syncit.inventory.loader import load_inventory, resolve_targets
+
+    if not command:
+        err_console.print("[red]Error: Must provide a command to run.[/red]")
+        raise typer.Exit(1)
 
     import shutil
 
@@ -73,10 +77,7 @@ def exec_cmd(
     def run_on_host(host_id: str, host_obj: "Host") -> None:  # type: ignore[name-defined]
         ssh_base = _build_ssh_base(host_obj)
         cmd_str = " ".join(command)
-        if sudo:
-            remote_cmd = ["sudo", "bash", "-c", cmd_str]
-        else:
-            remote_cmd = ["bash", "-c", cmd_str]
+        remote_cmd = ["sudo", "bash", "-c", cmd_str] if sudo else ["bash", "-c", cmd_str]
         full_cmd = ssh_base + remote_cmd
 
         try:

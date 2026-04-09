@@ -77,7 +77,7 @@ def exec_cmd(
 
     def run_on_host(host_id: str, host_obj: "Host") -> None:  # type: ignore[name-defined]
         ssh_base = _build_ssh_base(host_obj)
-        user_cmd = " ".join(command)
+        user_cmd = shlex.join(command)
         remote_cmd = (
             f"sudo bash -c {shlex.quote(user_cmd)}" if sudo else f"bash -c {shlex.quote(user_cmd)}"
         )

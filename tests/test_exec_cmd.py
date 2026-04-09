@@ -289,3 +289,35 @@ class TestExecPreservation:
         full_cmd = mock_popen.call_args[0][0]
         # Assert the command ends with a single string containing bash -c
         assert full_cmd[-1] == "bash -c 'ls -la /'"
+
+    def test_nested_quoting_preservation(self, tmp_path: Path) -> None:
+        import shlex
+
+        inv_file = tmp_path / "inv.yaml"
+        inv_file.write_text("hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n")
+
+        with patch("subprocess.Popen") as mock_popen:
+
+            def factory(*args, **kwargs):
+                m = MagicMock()
+                m.stdout.readline.side_effect = [""]
+                m.wait.return_value = 0
+                m.returncode = 0
+                return m
+
+            mock_popen.side_effect = factory
+
+            nested_cmd = ["bash", "-c", 'echo "hello world"; ls']
+            result = runner.invoke(
+                app,
+                ["exec", "-i", str(inv_file), "--all", "--"] + nested_cmd,
+            )
+
+        assert result.exit_code == 0
+        full_cmd = mock_popen.call_args[0][0]
+
+        # Calculate expected string using the same logic we have in the code
+        expected_user_cmd = shlex.join(nested_cmd)
+        expected_remote_cmd = f"bash -c {shlex.quote(expected_user_cmd)}"
+
+        assert full_cmd[-1] == expected_remote_cmd

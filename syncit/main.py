@@ -6,14 +6,13 @@ import typer
 from rich.console import Console
 
 from syncit.commands.apply import apply_cmd
-from syncit.commands.apply_remote import apply_remote_cmd
 from syncit.commands.diff import diff_cmd
 from syncit.commands.exec_cmd import exec_cmd
 from syncit.commands.pack import pack_cmd
-from syncit.commands.transfer import transfer_cmd
+from syncit.commands.up import up_cmd
 from syncit.commands.validate import validate_cmd
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 
 app = typer.Typer(
     name="syncit",
@@ -48,12 +47,9 @@ def main(
 # Register commands directly (no sub-Typers — avoids double-name UX issue)
 app.command("validate", help="Validate a bundle.yaml manifest file.")(validate_cmd)
 app.command("pack", help="Download and bundle all dependencies (run on online VM).")(pack_cmd)
-app.command("apply", help="Apply a bundle onto this machine (run on offline VM).")(apply_cmd)
+app.command("apply", help="Run zero-dependency remote apply on targeted VMs via SSH.")(apply_cmd)
+app.command("up", help="Pack a bundle and immediately apply it remotely.")(up_cmd)
 app.command("diff", help="Compare two bundle versions and show what changed.")(diff_cmd)
-app.command("transfer", help="Transfer a bundle to offline VMs via SCP.")(transfer_cmd)
-app.command("apply-remote", help="Run zero-dependency remote apply via SSH snippet.")(
-    apply_remote_cmd
-)
 app.command("exec", help="Run a shell command on remote hosts via SSH.")(exec_cmd)
 
 

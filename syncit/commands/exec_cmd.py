@@ -81,10 +81,21 @@ def exec_cmd(
                 timeout=timeout,
             )
             results[host_id] = (proc.returncode, proc.stdout, proc.stderr)
+
+            # Print output immediately for this host (escape brackets for Rich)
+            for line in proc.stdout.splitlines():
+                console.print(rf"[cyan]\[{host_id}][/cyan] {line}")
+            for line in proc.stderr.splitlines():
+                err_console.print(rf"[cyan]\[{host_id}][/cyan] [red]{line}[/red]")
+
         except subprocess.TimeoutExpired:
             results[host_id] = (124, "", f"Command timed out after {timeout}s")
+            err_console.print(
+                f"[cyan][{host_id}][/cyan] [red]Command timed out after {timeout}s[/red]"
+            )
         except Exception as e:
             results[host_id] = (1, "", str(e))
+            err_console.print(f"[cyan][{host_id}][/cyan] [red]{e}[/red]")
 
     with ThreadPoolExecutor(max_workers=len(hosts)) as executor:
         futures = {
@@ -92,16 +103,6 @@ def exec_cmd(
         }
         for future in as_completed(futures):
             future.result()  # propagate exceptions
-
-    # Print output with host prefix
-    for host_id, (returncode, stdout, stderr) in results.items():
-        for line in stdout.rstrip("\n").split("\n"):
-            if line:
-                console.print(f"[cyan]{host_id}[/cyan] {line}")
-        if stderr:
-            for line in stderr.rstrip("\n").split("\n"):
-                if line:
-                    err_console.print(f"[cyan]{host_id}[/cyan] [red]{line}[/red]")
 
     # Print summary
     failed = 0

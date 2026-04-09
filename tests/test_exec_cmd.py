@@ -195,6 +195,8 @@ class TestExecFailure:
 
         assert result.exit_code == 1
         assert "✗" in result.output
+        assert "[h1]" in result.output
+        assert "[h2]" in result.output
 
     def test_exit_code_0_when_all_succeed(self, tmp_path: Path) -> None:
         inv_file = tmp_path / "inv.yaml"
@@ -211,3 +213,5 @@ class TestExecFailure:
 
         assert result.exit_code == 0
         assert "✓" in result.output
+        assert "[h1]" in result.output
+        assert "[h2]" in result.output

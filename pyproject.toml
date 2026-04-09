@@ -1,6 +1,6 @@
 [project]
 name = "syncit"
-version = "0.1.0"
+version = "0.3.0"
 description = "Air-gap bundle orchestrator for Linux environments"
 requires-python = ">=3.11"
 dependencies = [

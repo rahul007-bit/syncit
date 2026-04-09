@@ -29,22 +29,18 @@ from syncit.plugins.registry import registry
 console = Console()
 err_console = Console(stderr=True)
 
-SYNCIT_VERSION = "0.1.0"
+SYNCIT_VERSION = "0.3.0"
 
 
-def pack_cmd(
-    manifest: Path = typer.Argument(..., help="Path to bundle.yaml manifest"),
-    output: Path = typer.Option(
-        Path("."), "--output", "-o", help="Output directory for the bundle"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Print what would be done, don't execute"
-    ),
-    only: str | None = typer.Option(None, "--only", help="Comma-separated list of plugins to run"),
-    format: str = typer.Option("dir", "--format", help="Output format: dir, tar.gz, zip"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-) -> None:
-    """Download and resolve all dependencies into a self-contained bundle directory."""
+def run_pack(
+    manifest: Path,
+    output: Path,
+    dry_run: bool = False,
+    only: str | None = None,
+    format: str = "dir",
+    verbose: bool = False,
+) -> Path | None:
+    """Download and resolve all dependencies and write them into a self-contained bundle directory."""
     # Load + validate manifest
     try:
         bundle = load_manifest(manifest)
@@ -141,6 +137,7 @@ def pack_cmd(
         )
 
     # Write bundle.meta.json
+    final_result_path: Path | None = bundle_dir
     if not dry_run:
         meta = BundleMetadata(
             name=name,
@@ -161,10 +158,10 @@ def pack_cmd(
 
             archive_target = (output / dir_name).resolve()
             archive_target.parent.mkdir(parents=True, exist_ok=True)
-            final_path = pack_archive(bundle_dir, archive_target, format)
+            final_result_path = pack_archive(bundle_dir, archive_target, format)
             if tmp_dir_path:
                 shutil.rmtree(tmp_dir_path, ignore_errors=True)
-            console.print(f"\n[bold green]Archive ready:[/] {final_path}")
+            console.print(f"\n[bold green]Archive ready:[/] {final_result_path}")
         else:
             console.print(f"\n[bold green]Bundle ready:[/] {bundle_dir}")
     else:
@@ -173,8 +170,34 @@ def pack_cmd(
             ext = ".zip" if format == "zip" else ".tar.gz"
             out_msg += ext
         console.print(f"\n[dim]Would write bundle to:[/dim] {out_msg}")
+        final_result_path = Path(out_msg)
 
     if not overall_ok:
         if tmp_dir_path:
             shutil.rmtree(tmp_dir_path, ignore_errors=True)
         raise typer.Exit(1)
+
+    return final_result_path
+
+
+def pack_cmd(
+    manifest: Path = typer.Argument(..., help="Path to bundle.yaml manifest"),
+    output: Path = typer.Option(
+        Path("."), "--output", "-o", help="Output directory for the bundle"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print what would be done, don't execute"
+    ),
+    only: str | None = typer.Option(None, "--only", help="Comma-separated list of plugins to run"),
+    format: str = typer.Option("dir", "--format", help="Output format: dir, tar.gz, zip"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+) -> None:
+    """Download and resolve all dependencies and write them into a self-contained bundle directory."""
+    run_pack(
+        manifest=manifest,
+        output=output,
+        dry_run=dry_run,
+        only=only,
+        format=format,
+        verbose=verbose,
+    )

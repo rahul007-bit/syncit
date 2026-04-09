@@ -168,7 +168,7 @@ cp -r $BUNDLE_DIR/{bundle_subdir}/rpms/* /srv/offline/dnf/rpms/
 createrepo_c /srv/offline/dnf/rpms
 cat > /etc/yum.repos.d/syncit.repo << 'EOF'
 [syncit]
-name=Offlinectl Local Repo
+name=Syncit Local Repo
 baseurl=file:///srv/offline/dnf/rpms
 enabled=1
 gpgcheck=0

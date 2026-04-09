@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -317,13 +318,27 @@ def test_apply_remote_command(tmp_path: Path) -> None:
     bundle_path = tmp_path / "b.tar.gz"
     bundle_path.write_text("fake tar")
 
+    # subprocess.run calls in order:
+    # 0: SCP bundle
+    # 1: SSH extract + mkdir
+    # 2: SSH cat state.json -> return empty state
+    # 3-5: SSH sudo tee state.json (one per task, 3 tasks in fixture)
+    run_side_effects = [
+        MagicMock(returncode=0),  # SCP
+        MagicMock(returncode=0),  # extract
+        MagicMock(returncode=1, stdout=""),  # cat state.json -> not found
+        MagicMock(returncode=0),  # tee after task 1
+        MagicMock(returncode=0),  # tee after task 2
+        MagicMock(returncode=0),  # tee after task 3
+    ]
+
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value.returncode = 0
+        mock_run.side_effect = run_side_effects
         with patch("subprocess.Popen") as mock_popen:
             mock_proc = MagicMock()
             mock_proc.returncode = 0
-            mock_proc.stdout.readline.return_value = ""  # EOF immediately
-            mock_popen.return_value.__enter__.return_value = mock_proc
+            mock_proc.stdin = MagicMock()
+            mock_popen.return_value = mock_proc
 
             with patch("shutil.which", return_value="ssh"):
                 with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
@@ -349,33 +364,53 @@ def test_apply_remote_command(tmp_path: Path) -> None:
         print("OUTPUT:", result.output)
     assert result.exit_code == 0
 
-    # subprocess.run is called twice: (1) SCP transfer, (2) SSH cleanup rm -f
-    assert mock_run.call_count == 2
+    # subprocess.run calls: SCP, extract, cat state, 3x tee state = 6 total
+    assert mock_run.call_count == 6
 
-    # Call 0: SCP — transfers bundle + apply.sh together to remote
+    # Call 0: SCP — transfers bundle to remote
     scp_call = mock_run.call_args_list[0][0][0]
     assert scp_call[0] == "scp"
-    assert str(bundle_path) == scp_call[-3]  # bundle tarball
-    assert scp_call[-2].endswith(".sh")  # apply.sh tempfile
-    assert scp_call[-1] == "root@10.0.0.1:/opt"  # destination
+    assert str(bundle_path) in scp_call
+    assert "root@10.0.0.1:/opt" in scp_call
 
-    # Call 1: SSH cleanup — rm -f apply.sh on target (best-effort)
-    cleanup_call = mock_run.call_args_list[1][0][0]
-    assert cleanup_call[0] == "ssh"
-    assert cleanup_call[-2] == "root@10.0.0.1"
-    assert "rm -f /opt/apply-" in cleanup_call[-1]
+    # Call 1: SSH extract + mkdir
+    extract_call = mock_run.call_args_list[1][0][0]
+    assert extract_call[0] == "ssh"
+    assert "root@10.0.0.1" in extract_call
+    extract_cmd_str = extract_call[-1]
+    assert "tar -xf" in extract_cmd_str
+    assert "mkdir -p /opt/syncit/" in extract_cmd_str
 
-    # Popen: streaming SSH execution — runs apply.sh on target, never syncit
-    ssh_call = mock_popen.call_args[0][0]
-    assert ssh_call[0] == "ssh"
-    assert ssh_call[-2] == "root@10.0.0.1"
-    assert "sudo bash /opt/apply-" in ssh_call[-1]
-    assert ssh_call[-1].endswith(".sh /opt/b.tar.gz")
-    assert "syncit apply" not in ssh_call[-1]
+    # Call 2: SSH cat state.json
+    cat_call = mock_run.call_args_list[2][0][0]
+    assert cat_call[0] == "ssh"
+    assert "sudo" in cat_call
+    assert "cat" in cat_call
+    assert "/s.json" in cat_call
+
+    # Calls 3-5: SSH sudo tee state.json (one per task)
+    for i in range(3, 6):
+        tee_call = mock_run.call_args_list[i][0][0]
+        assert tee_call[0] == "ssh"
+        assert "sudo" in tee_call
+        assert "tee" in tee_call
+        assert "/s.json" in tee_call
+
+    # Popen: 3 calls (one per task), each piping via "sudo bash -s"
+    assert mock_popen.call_count == 3
+    for popen_call in mock_popen.call_args_list:
+        ssh_cmd = popen_call[0][0]
+        assert ssh_cmd[0] == "ssh"
+        assert "root@10.0.0.1" in ssh_cmd
+        assert "sudo" in ssh_cmd
+        assert "bash" in ssh_cmd
+        assert "-s" in ssh_cmd
+        # stdin should be a PIPE
+        assert popen_call[1]["stdin"] == subprocess.PIPE
 
 
 def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
-    """Verify --ssh-key is threaded through both scp and ssh invocations."""
+    """Verify ssh_key is threaded through both scp and ssh invocations."""
     inv_file = tmp_path / "inv.yaml"
     inv_file.write_text(
         "hosts:\n"
@@ -388,13 +423,22 @@ def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
     bundle_path = tmp_path / "b.tar.gz"
     bundle_path.write_text("fake")
 
+    run_side_effects = [
+        MagicMock(returncode=0),  # SCP
+        MagicMock(returncode=0),  # extract
+        MagicMock(returncode=1, stdout=""),  # cat state.json -> not found
+        MagicMock(returncode=0),  # tee after task 1
+        MagicMock(returncode=0),  # tee after task 2
+        MagicMock(returncode=0),  # tee after task 3
+    ]
+
     with patch("subprocess.run") as mock_run:
-        mock_run.return_value.returncode = 0
+        mock_run.side_effect = run_side_effects
         with patch("subprocess.Popen") as mock_popen:
             mock_proc = MagicMock()
             mock_proc.returncode = 0
-            mock_proc.stdout.readline.return_value = ""  # EOF immediately
-            mock_popen.return_value.__enter__.return_value = mock_proc
+            mock_proc.stdin = MagicMock()
+            mock_popen.return_value = mock_proc
 
             with patch("shutil.which", return_value="ssh"):
                 with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
@@ -417,13 +461,16 @@ def test_apply_remote_with_ssh_key(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
 
+    # Verify -i flag in SCP call
     scp_call = mock_run.call_args_list[0][0][0]
     assert "-i" in scp_call
     assert "/home/user/.ssh/id_ed25519" in scp_call
 
-    ssh_call = mock_popen.call_args[0][0]
-    assert "-i" in ssh_call
-    assert "/home/user/.ssh/id_ed25519" in ssh_call
+    # Verify -i flag in Popen SSH calls
+    for popen_call in mock_popen.call_args_list:
+        ssh_cmd = popen_call[0][0]
+        assert "-i" in ssh_cmd
+        assert "/home/user/.ssh/id_ed25519" in ssh_cmd
 
 
 def test_apply_remote_print_script(tmp_path: Path) -> None:
@@ -445,3 +492,164 @@ def test_apply_remote_print_script(tmp_path: Path) -> None:
 
     # Should be no network interaction
     mock_run.assert_not_called()
+
+
+def test_apply_remote_skips_unchanged(tmp_path: Path) -> None:
+    """If remote state has matching checksum + 'success', the task is skipped and Popen is not called."""
+    inv_file = tmp_path / "inv.yaml"
+    inv_file.write_text(
+        "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n    state_file: /s.json\n    bundle_dest: /opt"
+    )
+
+    bundle_path = tmp_path / "b.tar.gz"
+    bundle_path.write_text("fake tar")
+
+    # Compute the actual checksums for the bundle so we can put them in the remote state
+    with patch("syncit.bundle.archive.detect_bundle") as prep_detect:
+        prep_detect.return_value.__enter__.return_value = tmp_path
+        (tmp_path / "bundle.yaml").write_text(Path("tests/fixtures/bundle.yaml").read_text())
+
+    from syncit.bundle.bundle import compute_task_checksum
+    from syncit.state import RemoteState, TaskState
+
+    # Build a remote state where all 3 tasks have matching checksums and "success"
+    # The bundle dir has no artifact subdirs, so checksums will be "sha256:" (empty)
+    apt_checksum = compute_task_checksum(tmp_path, "apt")
+    pip_checksum = compute_task_checksum(tmp_path, "pip")
+    oci_checksum = compute_task_checksum(tmp_path, "oci_image")
+
+    existing_state = RemoteState(
+        applied_tasks={
+            "Install base packages": TaskState(checksum=apt_checksum, status="success"),
+            "Install Pip Deps": TaskState(checksum=pip_checksum, status="success"),
+            "Sync Images": TaskState(checksum=oci_checksum, status="success"),
+        }
+    )
+
+    # subprocess.run calls: SCP, extract, cat state.json (returns existing state)
+    run_side_effects = [
+        MagicMock(returncode=0),  # SCP
+        MagicMock(returncode=0),  # extract
+        MagicMock(returncode=0, stdout=existing_state.model_dump_json()),  # cat state.json
+    ]
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = run_side_effects
+        with patch("subprocess.Popen") as mock_popen:
+            with patch("shutil.which", return_value="ssh"):
+                with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
+                    mock_detect.return_value.__enter__.return_value = tmp_path
+                    (tmp_path / "bundle.yaml").write_text(
+                        Path("tests/fixtures/bundle.yaml").read_text()
+                    )
+
+                    result = runner.invoke(
+                        app,
+                        [
+                            "apply-remote",
+                            "--bundle",
+                            str(bundle_path),
+                            "-i",
+                            str(inv_file),
+                            "-t",
+                            "h1",
+                        ],
+                    )
+
+    assert result.exit_code == 0
+
+    # Popen should NEVER be called — all tasks skipped
+    mock_popen.assert_not_called()
+
+    # Output should indicate SKIP for each task
+    assert "SKIP" in result.output
+
+    # subprocess.run: SCP, extract, cat state.json = 3 calls (no tee pushes needed)
+    assert mock_run.call_count == 3
+
+
+def test_apply_remote_failed_task_aborts(tmp_path: Path) -> None:
+    """If a task fails (non-zero exit code), state is updated with 'failed' and pipeline aborts."""
+    inv_file = tmp_path / "inv.yaml"
+    inv_file.write_text(
+        "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n    state_file: /s.json\n    bundle_dest: /opt"
+    )
+
+    bundle_path = tmp_path / "b.tar.gz"
+    bundle_path.write_text("fake tar")
+
+    # Use a simple manifest with only 2 tasks so we can control which one fails
+    simple_manifest = (
+        "apiVersion: syncit/v1\n"
+        "kind: Bundle\n"
+        "metadata:\n"
+        "  name: test-fail\n"
+        "  version: '1.0'\n"
+        "spec:\n"
+        "  targets:\n"
+        "    distro: ubuntu\n"
+        "    codename: noble\n"
+        "    arch: amd64\n"
+        "  tasks:\n"
+        "    - name: Install packages\n"
+        "      plugin: apt\n"
+        "      packages:\n"
+        "        - git\n"
+        "    - name: Install Pip Deps\n"
+        "      plugin: pip\n"
+        "      python_version: '3.11'\n"
+        "      requirements: ./requirements.txt\n"
+    )
+
+    # subprocess.run calls: SCP, extract, cat state.json, tee (after first task fails)
+    run_side_effects = [
+        MagicMock(returncode=0),  # SCP
+        MagicMock(returncode=0),  # extract
+        MagicMock(returncode=1, stdout=""),  # cat state.json -> not found
+        MagicMock(returncode=0),  # tee after first task fails
+    ]
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = run_side_effects
+        with patch("subprocess.Popen") as mock_popen:
+            # First Popen call (apt task) fails
+            mock_proc_fail = MagicMock()
+            mock_proc_fail.returncode = 1
+            mock_proc_fail.stdin = MagicMock()
+            mock_popen.return_value = mock_proc_fail
+
+            with patch("shutil.which", return_value="ssh"):
+                with patch("syncit.bundle.archive.detect_bundle") as mock_detect:
+                    mock_detect.return_value.__enter__.return_value = tmp_path
+                    (tmp_path / "bundle.yaml").write_text(simple_manifest)
+
+                    result = runner.invoke(
+                        app,
+                        [
+                            "apply-remote",
+                            "--bundle",
+                            str(bundle_path),
+                            "-i",
+                            str(inv_file),
+                            "-t",
+                            "h1",
+                        ],
+                    )
+
+    # Should have exited with error
+    assert result.exit_code != 0
+
+    # Only 1 Popen call — first task failed, second was never reached
+    assert mock_popen.call_count == 1
+
+    # Output should indicate FAILED
+    assert "FAILED" in result.output
+
+    # Verify state was pushed with "failed" status via tee
+    tee_call = mock_run.call_args_list[3]
+    state_json_input = tee_call[1].get("input", tee_call[0][1] if len(tee_call[0]) > 1 else None)
+    if state_json_input:
+        import json
+
+        state_data = json.loads(state_json_input)
+        assert state_data["applied_tasks"]["Install packages"]["status"] == "failed"

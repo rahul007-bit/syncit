@@ -13,8 +13,14 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+from typing import List
+
+
 def exec_cmd(
-    command: list[str] = typer.Argument(..., help="Command to run"),
+    command: List[str] = typer.Argument(
+        ...,
+        help="Command to run. Use '--' before the command if it contains flags (e.g., syncit exec -i inv.yaml --all -- ls -l)",
+    ),
     inventory: Path = typer.Option(..., "-i", "--inventory"),
     target: str | None = typer.Option(None, "-t", "--target"),
     group: str | None = typer.Option(None, "-g", "--group"),
@@ -62,7 +68,7 @@ def exec_cmd(
         err_console.print("[yellow]No hosts to execute on.[/yellow]")
         raise typer.Exit(0)
 
-    results: dict[str, tuple[int, str, str]] = {}
+    results: dict[str, int] = {}
 
     def run_on_host(host_id: str, host_obj: "Host") -> None:  # type: ignore[name-defined]
         ssh_base = _build_ssh_base(host_obj)
@@ -74,27 +80,30 @@ def exec_cmd(
         full_cmd = ssh_base + remote_cmd
 
         try:
-            proc = subprocess.run(
+            # Popen with combined stdout/stderr for line-by-line streaming
+            proc = subprocess.Popen(
                 full_cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=timeout,
+                bufsize=1,
             )
-            results[host_id] = (proc.returncode, proc.stdout, proc.stderr)
 
-            # Print output immediately for this host (escape brackets for Rich)
-            for line in proc.stdout.splitlines():
-                console.print(rf"[cyan]\[{host_id}][/cyan] {line}")
-            for line in proc.stderr.splitlines():
-                err_console.print(rf"[cyan]\[{host_id}][/cyan] [red]{line}[/red]")
+            if proc.stdout:
+                for line in iter(proc.stdout.readline, ""):
+                    if line:
+                        console.print(rf"[cyan]\[{host_id}][/cyan] {line.rstrip()}")
+
+            proc.wait(timeout=timeout)
+            results[host_id] = proc.returncode
 
         except subprocess.TimeoutExpired:
-            results[host_id] = (124, "", f"Command timed out after {timeout}s")
+            results[host_id] = 124
             err_console.print(
                 f"[cyan][{host_id}][/cyan] [red]Command timed out after {timeout}s[/red]"
             )
         except Exception as e:
-            results[host_id] = (1, "", str(e))
+            results[host_id] = 1
             err_console.print(f"[cyan][{host_id}][/cyan] [red]{e}[/red]")
 
     with ThreadPoolExecutor(max_workers=len(hosts)) as executor:
@@ -106,7 +115,7 @@ def exec_cmd(
 
     # Print summary
     failed = 0
-    for host_id, (returncode, _, _) in results.items():
+    for host_id, returncode in results.items():
         if returncode == 0:
             console.print(f"✓ [cyan]{host_id}[/cyan] — exit {returncode}")
         else:

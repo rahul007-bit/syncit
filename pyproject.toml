@@ -1,6 +1,6 @@
 [project]
 name = "syncit"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Air-gap bundle orchestrator for Linux environments"
 requires-python = ">=3.11"
 dependencies = [
@@ -28,6 +28,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["syncit"]
+ 
+[tool.hatch.version]
+path = "syncit/__init__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

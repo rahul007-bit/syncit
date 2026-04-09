@@ -90,6 +90,10 @@ class PipPlugin(OfflinePlugin):
 
         wheel_dir.mkdir(parents=True, exist_ok=True)
 
+        # Cache directory
+        cache_dir = Path("~/.cache/syncit/pip").expanduser()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
         # First attempt: binary-only (preferred for air-gap compatibility)
         cmd = [
             *_pip_executable(),
@@ -101,7 +105,11 @@ class PipPlugin(OfflinePlugin):
             "--only-binary=:all:",
             "--dest",
             str(wheel_dir),
+            "--cache-dir",
+            str(cache_dir),
         ]
+        if ctx.no_cache:
+            cmd.append("--no-cache-dir")
 
         def do_run(run_cmd: list[str]) -> subprocess.CompletedProcess:
             if ctx.verbose:

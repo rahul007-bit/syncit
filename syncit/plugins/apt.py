@@ -127,19 +127,59 @@ class AptPlugin(OfflinePlugin):
         if ctx.verbose:
             rprint(f"[cyan]→[/] Resolved {total_dl} packages (including transitive deps)")
 
-        # 2. Download all resolved packages
+        # 2. Download all resolved packages with caching
+        cache_dir = Path("~/.cache/syncit/apt").expanduser()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
         for i, p in enumerate(sorted_pkgs, start=1):
             if ctx.verbose:
-                rprint(f"[cyan]→[/] Downloading: {p} ({i}/{total_dl})...")
-            dl_cmd = ["apt-get", "download", p]
-            dl_res = _run(dl_cmd, cwd=str(deb_dir))
-            if dl_res.returncode != 0:
-                err = f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}"
+                rprint(f"[cyan]→[/] Processing: {p} ({i}/{total_dl})...")
+
+            # Resolve exact filename for cache check
+            # Format: name_version_arch.deb (with epoch : replaced by %3a)
+            pkg_info = _run(["apt-cache", "show", p])
+            if pkg_info.returncode != 0:
+                errors.append(f"[apt] apt-cache show failed for '{p}'")
+                continue
+
+            ver, arch = "", ""
+            for line in pkg_info.stdout.splitlines():
+                if line.startswith("Version: "):
+                    ver = line.split(": ", 1)[1]
+                if line.startswith("Architecture: "):
+                    arch = line.split(": ", 1)[1]
+                if ver and arch:
+                    break
+
+            deb_filename = f"{p}_{ver.replace(':', '%3a')}_{arch}.deb"
+            cache_path = cache_dir / deb_filename
+
+            if not ctx.no_cache and cache_path.exists():
                 if ctx.verbose:
-                    errors.append(err)
+                    rprint(f"    [dim]Using cached: {deb_filename}[/dim]")
+            else:
+                if ctx.verbose:
+                    action = "Forced re-download" if ctx.no_cache else "Downloading"
+                    rprint(f"    [dim]{action}: {p}...[/dim]")
+                dl_res = _run(["apt-get", "download", p], cwd=str(cache_dir))
+                if dl_res.returncode != 0:
+                    errors.append(
+                        f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}"
+                    )
+                    continue
+
+            # Copy from cache to bundle debs dir
+            if cache_path.exists():
+                shutil.copy2(str(cache_path), str(deb_dir / deb_filename))
+            else:
+                # Fallback: maybe the filename was different than expected?
+                # Find the most recently modified .deb in cache_dir starting with p_
+                cand = list(cache_dir.glob(f"{p}_*.deb"))
+                if cand:
+                    latest = max(cand, key=lambda x: x.stat().st_mtime)
+                    shutil.copy2(str(latest), str(deb_dir / latest.name))
                 else:
-                    errors.append(err)
-                # Non-fatal: continue downloading others
+                    errors.append(f"[apt] Could not find downloaded .deb for '{p}' in cache")
 
         # 3. Generate Packages index
         if ctx.verbose:

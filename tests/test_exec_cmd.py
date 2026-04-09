@@ -35,15 +35,19 @@ class TestExecSingleTarget:
         inv_file = tmp_path / "inv.yaml"
         inv_file.write_text("hosts:\n  airgapped-test:\n    host: 10.0.0.1\n    user: root\n")
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="disk usage\n", stderr="")
+        with patch("subprocess.Popen") as mock_popen:
+            m = MagicMock()
+            m.stdout.readline.side_effect = ["disk usage\n", ""]
+            m.returncode = 0
+            mock_popen.return_value = m
+
             result = runner.invoke(
                 app,
                 ["exec", "-i", str(inv_file), "-t", "airgapped-test", "--", "df", "-h"],
             )
 
         assert result.exit_code == 0
-        ssh_call = mock_run.call_args[0][0]
+        ssh_call = mock_popen.call_args[0][0]
         assert ssh_call[0] == "ssh"
         assert ssh_call[1] == "root@10.0.0.1"
         assert ssh_call[-3:] == ["bash", "-c", "df -h"]
@@ -52,8 +56,11 @@ class TestExecSingleTarget:
         inv_file = tmp_path / "inv.yaml"
         inv_file.write_text("hosts:\n  airgapped-test:\n    host: 10.0.0.1\n    user: root\n")
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.Popen") as mock_popen:
+            m = MagicMock()
+            m.stdout.readline.side_effect = [""]
+            m.returncode = 0
+            mock_popen.return_value = m
             result = runner.invoke(
                 app,
                 [
@@ -71,7 +78,7 @@ class TestExecSingleTarget:
             )
 
         assert result.exit_code == 0
-        ssh_call = mock_run.call_args[0][0]
+        ssh_call = mock_popen.call_args[0][0]
         assert ssh_call[-4:] == ["sudo", "bash", "-c", "systemctl status docker"]
 
     def test_ssh_key_is_used(self, tmp_path: Path) -> None:
@@ -80,15 +87,18 @@ class TestExecSingleTarget:
             "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n    ssh_key: /tmp/id_rsa\n"
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.Popen") as mock_popen:
+            m = MagicMock()
+            m.stdout.readline.side_effect = [""]
+            m.returncode = 0
+            mock_popen.return_value = m
             result = runner.invoke(
                 app,
                 ["exec", "-i", str(inv_file), "-t", "h1", "--", "uptime"],
             )
 
         assert result.exit_code == 0
-        ssh_call = mock_run.call_args[0][0]
+        ssh_call = mock_popen.call_args[0][0]
         assert "-i" in ssh_call
         assert "/tmp/id_rsa" in ssh_call
 
@@ -101,15 +111,22 @@ class TestExecGroup:
             "groups:\n  all-offline:\n    - h1\n    - h2\n"
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.Popen") as mock_popen:
+
+            def factory(*args, **kwargs):
+                m = MagicMock()
+                m.stdout.readline.side_effect = [""]
+                m.returncode = 0
+                return m
+
+            mock_popen.side_effect = factory
             result = runner.invoke(
                 app,
                 ["exec", "-i", str(inv_file), "-g", "all-offline", "--", "uptime"],
             )
 
         assert result.exit_code == 0
-        assert mock_run.call_count == 2
+        assert mock_popen.call_count == 2
 
 
 class TestExecAllHosts:
@@ -119,15 +136,22 @@ class TestExecAllHosts:
             "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n  h2:\n    host: 10.0.0.2\n    user: root\n"
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.Popen") as mock_popen:
+
+            def factory(*args, **kwargs):
+                m = MagicMock()
+                m.stdout.readline.side_effect = [""]
+                m.returncode = 0
+                return m
+
+            mock_popen.side_effect = factory
             result = runner.invoke(
                 app,
                 ["exec", "-i", str(inv_file), "--all", "--", "uptime"],
             )
 
         assert result.exit_code == 0
-        assert mock_run.call_count == 2
+        assert mock_popen.call_count == 2
 
 
 class TestExecMutex:
@@ -151,8 +175,15 @@ class TestExecParallel:
             "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n  h2:\n    host: 10.0.0.2\n    user: root\n"
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.Popen") as mock_popen:
+
+            def factory(*args, **kwargs):
+                m = MagicMock()
+                m.stdout.readline.side_effect = [""]
+                m.returncode = 0
+                return m
+
+            mock_popen.side_effect = factory
             with patch("syncit.commands.exec_cmd.ThreadPoolExecutor") as mock_tpe:
                 mock_executor = MagicMock()
                 mock_tpe.return_value.__enter__ = MagicMock(return_value=mock_executor)
@@ -183,11 +214,19 @@ class TestExecFailure:
             "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n  h2:\n    host: 10.0.0.2\n    user: root\n"
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = [
-                MagicMock(returncode=0, stdout="h1 ok\n", stderr=""),
-                MagicMock(returncode=1, stdout="", stderr="h2 error\n"),
-            ]
+        with patch("subprocess.Popen") as mock_popen:
+            m1 = MagicMock()
+            m1.stdout.readline.side_effect = ["h1 ok", ""]
+            m1.wait.return_value = 0
+            m1.returncode = 0
+
+            m2 = MagicMock()
+            m2.stdout.readline.side_effect = ["h2 error", ""]
+            m2.wait.return_value = 1
+            m2.returncode = 1
+
+            mock_popen.side_effect = [m1, m2]
+
             result = runner.invoke(
                 app,
                 ["exec", "-i", str(inv_file), "--all", "--", "echo ok"],
@@ -204,8 +243,17 @@ class TestExecFailure:
             "hosts:\n  h1:\n    host: 10.0.0.1\n    user: root\n  h2:\n    host: 10.0.0.2\n    user: root\n"
         )
 
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="ok\n", stderr="")
+        with patch("subprocess.Popen") as mock_popen:
+
+            def factory(*args, **kwargs):
+                m = MagicMock()
+                m.stdout.readline.side_effect = ["ok", ""]
+                m.wait.return_value = 0
+                m.returncode = 0
+                return m
+
+            mock_popen.side_effect = factory
+
             result = runner.invoke(
                 app,
                 ["exec", "-i", str(inv_file), "--all", "--", "echo ok"],

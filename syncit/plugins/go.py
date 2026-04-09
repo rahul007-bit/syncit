@@ -44,8 +44,9 @@ class GoPlugin(OfflinePlugin):
         target_cache = ctx.bundle_dir / "go" / "modcache"
         target_cache.mkdir(parents=True, exist_ok=True)
 
-        env = os.environ.copy()
-        env["GOMODCACHE"] = str(target_cache)
+        if ctx.no_cache:
+            if ctx.verbose:
+                print("[go] --no-cache provided. skipping global cache check...")
 
         projects = task_spec.get("projects", [])
         for task in projects:
@@ -56,6 +57,12 @@ class GoPlugin(OfflinePlugin):
                 errors.append(f"[go] {proj_name}: go.mod not found in {proj_dir}")
                 continue
 
+            # 1. Seed global cache (normal env)
+            subprocess.run(["go", "mod", "download", "./..."], cwd=proj_dir)
+
+            # 2. Seed bundle-specific cache from global cache
+            env = os.environ.copy()
+            env["GOMODCACHE"] = str(target_cache)
             res = subprocess.run(
                 ["go", "mod", "download", "./..."],
                 cwd=proj_dir,

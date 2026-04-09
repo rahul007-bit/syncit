@@ -24,6 +24,9 @@ def up_cmd(
     all_hosts: bool = typer.Option(False, "--all", help="Apply to all hosts in inventory"),
     format: str = typer.Option("tar.gz", "--format", help="Archive format to use"),
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Verbose output"),
+    no_cache: bool = typer.Option(
+        False, "--no-cache", help="Do not use local cache, force download"
+    ),
 ) -> None:
     """Pack a bundle and immediately apply it remotely to the specified targets."""
     from syncit.inventory.loader import load_inventory, resolve_targets
@@ -55,6 +58,7 @@ def up_cmd(
             dry_run=False,
             format=format,
             verbose=verbose,
+            no_cache=no_cache,
         )
 
         if not bundle_path or not bundle_path.exists():

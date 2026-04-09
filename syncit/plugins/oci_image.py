@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from syncit.plugins.base import (
@@ -100,14 +101,39 @@ class OciImagePlugin(OfflinePlugin):
             safe = _safe_name(source)
             archive = image_dir / f"{safe}.tar"
 
-            cmd = ["skopeo", "copy", f"docker://{source}", f"oci-archive:{archive}"]
-            result = _run(cmd)
-            if result.returncode != 0:
-                err = (
-                    f"[oci_image] skopeo copy failed for '{source}'\n"
-                    f"Command: {' '.join(cmd)}\n{result.stderr.strip()}"
-                )
-                errors.append(err)
+            import hashlib
+
+            cache_root = Path("~/.cache/syncit/oci_image").expanduser()
+            cache_root.mkdir(parents=True, exist_ok=True)
+
+            # Cache path based on hash of source name
+            source_hash = hashlib.sha256(source.encode()).hexdigest()[:12]
+            cache_path = cache_root / source_hash
+
+            if ctx.no_cache:
+                if ctx.verbose:
+                    print(f"[oci_image] --no-cache: clearing cache for {source}...")
+                shutil.rmtree(cache_path, ignore_errors=True)
+
+            # 1. Pull to cache if missing
+            if not cache_path.exists():
+                if ctx.verbose:
+                    print(f"[oci_image] Pulling {source} to cache (OCI layout)...")
+                cache_path.mkdir(parents=True, exist_ok=True)
+                pull_cmd = ["skopeo", "copy", f"docker://{source}", f"oci:{cache_path}"]
+                pull_res = _run(pull_cmd)
+                if pull_res.returncode != 0:
+                    errors.append(f"[oci_image] Failed to pull {source}: {pull_res.stderr.strip()}")
+                    shutil.rmtree(cache_path, ignore_errors=True)
+                    continue
+
+            # 2. Copy from cache (OCI layout) to bundle (OCI archive)
+            if ctx.verbose:
+                print(f"[oci_image] Bundling {source} from cache layout...")
+            bundle_cmd = ["skopeo", "copy", f"oci:{cache_path}", f"oci-archive:{archive}"]
+            bundle_res = _run(bundle_cmd)
+            if bundle_res.returncode != 0:
+                errors.append(f"[oci_image] Failed to bundle {source}: {bundle_res.stderr.strip()}")
                 continue
 
             digest = _get_digest(source)

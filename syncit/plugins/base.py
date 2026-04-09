@@ -10,6 +10,7 @@ class PackContext:
     manifest_dir: Path  # Directory containing bundle.yaml (for relative paths)
     dry_run: bool = False
     verbose: bool = False
+    no_cache: bool = False
 
 
 @dataclass

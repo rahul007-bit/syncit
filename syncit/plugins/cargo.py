@@ -53,6 +53,12 @@ class CargoPlugin(OfflinePlugin):
             target_dir.mkdir(parents=True, exist_ok=True)
             vendor_dir = target_dir / "vendor"
 
+            if ctx.no_cache:
+                if ctx.verbose:
+                    print(
+                        f"[cargo] {proj_name}: --no-cache provided. Note: cargo vendor always verifies from cache."
+                    )
+
             res = subprocess.run(
                 ["cargo", "vendor", str(vendor_dir)],
                 cwd=proj_dir,

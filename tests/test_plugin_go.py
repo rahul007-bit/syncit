@@ -34,13 +34,12 @@ def test_go_pack(tmp_path: Path) -> None:
         res = plugin.pack(spec, ctx)
 
     assert res.success
-    mock_run.assert_called_once()
-    args = mock_run.call_args[0][0]
-    kwargs = mock_run.call_args[1]
-
-    assert args == ["go", "mod", "download", "./..."]
-    assert "GOMODCACHE" in kwargs["env"]
-    assert str(kwargs["env"]["GOMODCACHE"]).endswith("go/modcache")
+    assert mock_run.call_count == 2
+    # Check the second call (seeding bundle)
+    call_args, call_kwargs = mock_run.call_args_list[1]
+    assert call_args[0] == ["go", "mod", "download", "./..."]
+    assert "GOMODCACHE" in call_kwargs["env"]
+    assert str(call_kwargs["env"]["GOMODCACHE"]).endswith("go/modcache")
 
 
 def test_go_apply(tmp_path: Path, monkeypatch) -> None:

@@ -50,7 +50,15 @@ class NpmPlugin(OfflinePlugin):
                 continue
 
             # Run npm ci
-            res = subprocess.run(["npm", "ci"], cwd=proj_dir, capture_output=True, text=True)
+            ci_cmd = ["npm", "ci"]
+            if ctx.no_cache:
+                if ctx.verbose:
+                    print(f"[npm] {proj_name}: --no-cache provided, bypassing local cache...")
+                # Unfortunately npm doesn't have a direct 'no-cache' flag for ci,
+                # but we can force network with --prefer-online
+                ci_cmd.append("--prefer-online")
+
+            res = subprocess.run(ci_cmd, cwd=proj_dir, capture_output=True, text=True)
             if res.returncode != 0:
                 errors.append(f"[npm] {proj_name}: npm ci failed.\n{res.stderr}")
                 continue

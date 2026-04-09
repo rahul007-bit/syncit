@@ -29,7 +29,7 @@ from syncit.plugins.registry import registry
 console = Console()
 err_console = Console(stderr=True)
 
-SYNCIT_VERSION = "0.3.0"
+from syncit import __version__ as SYNCIT_VERSION
 
 
 def run_pack(
@@ -39,6 +39,7 @@ def run_pack(
     only: str | None = None,
     format: str = "dir",
     verbose: bool = False,
+    no_cache: bool = False,
 ) -> Path | None:
     """Download and resolve all dependencies and write them into a self-contained bundle directory."""
     # Load + validate manifest
@@ -105,6 +106,7 @@ def run_pack(
             manifest_dir=manifest_dir,
             dry_run=dry_run,
             verbose=verbose,
+            no_cache=no_cache,
         )
 
         try:
@@ -191,6 +193,9 @@ def pack_cmd(
     only: str | None = typer.Option(None, "--only", help="Comma-separated list of plugins to run"),
     format: str = typer.Option("dir", "--format", help="Output format: dir, tar.gz, zip"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    no_cache: bool = typer.Option(
+        False, "--no-cache", help="Do not use local cache, force download"
+    ),
 ) -> None:
     """Download and resolve all dependencies and write them into a self-contained bundle directory."""
     run_pack(
@@ -200,4 +205,5 @@ def pack_cmd(
         only=only,
         format=format,
         verbose=verbose,
+        no_cache=no_cache,
     )

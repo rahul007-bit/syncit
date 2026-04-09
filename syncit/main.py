@@ -12,7 +12,7 @@ from syncit.commands.pack import pack_cmd
 from syncit.commands.up import up_cmd
 from syncit.commands.validate import validate_cmd
 
-__version__ = "0.3.0"
+from syncit import __version__
 
 app = typer.Typer(
     name="syncit",

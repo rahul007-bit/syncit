@@ -66,14 +66,31 @@ class DnfPlugin(OfflinePlugin):
         rpm_dir = ctx.bundle_dir / "dnf" / "rpms"
         rpm_dir.mkdir(parents=True, exist_ok=True)
 
-        res = subprocess.run(
-            ["dnf", "download", "--resolve", "--destdir", str(rpm_dir)] + packages,
-            capture_output=True,
-            text=True,
-        )
+        # Cache directory
+        cache_dir = Path("~/.cache/syncit/dnf").expanduser()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Download missing packages to cache
+        dl_cmd = ["dnf", "download", "--resolve", "--destdir", str(cache_dir)] + packages
+        if ctx.no_cache:
+            if ctx.verbose:
+                print(f"[dnf] --no-cache: clearing local cache for {packages}...")
+            for pkg in packages:
+                for f in cache_dir.glob(f"{pkg}-*"):
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+
+        res = subprocess.run(dl_cmd, capture_output=True, text=True)
         if res.returncode != 0:
             errors.append(f"[dnf] download failed: {res.stderr}")
             return PluginResult(False, "Failed to download RPMs", artifacts, errors)
+
+        # 2. Copy artifacts from cache to bundle
+        for f in cache_dir.iterdir():
+            if f.is_file() and f.suffix == ".rpm":
+                shutil.copy2(f, rpm_dir / f.name)
 
         res2 = subprocess.run(
             ["createrepo_c", str(rpm_dir)],

@@ -1,0 +1,24 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: k8s-offline-apt
+  version: "1.31.0"
+  description: "Kubernetes v1.31 bundle via apt (for Ubuntu/Debian targets)"
+
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+
+  tasks:
+    - name: Install Kubernetes packages via apt
+      plugin: apt
+      repos:
+        - name: kubernetes
+          url: "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
+          gpg_key: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
+      packages:
+        - kubelet
+        - kubeadm
+        - kubectl

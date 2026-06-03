@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
+import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -57,173 +60,300 @@ class AptPlugin(OfflinePlugin):
         for pkg in packages:
             if not isinstance(pkg, str) or not pkg.strip():
                 errors.append(f"[apt] Invalid package entry: {pkg!r}")
+
+        # Validate optional repos
+        repos = task_spec.get("repos", [])
+        if repos:
+            if not isinstance(repos, list):
+                errors.append("[apt] 'repos' must be a list")
+            else:
+                has_gpg_tool = shutil.which("gpg") is not None
+                has_download_tool = (
+                    shutil.which("curl") is not None or shutil.which("wget") is not None
+                )
+                for i, repo in enumerate(repos):
+                    if not isinstance(repo, dict):
+                        errors.append(f"[apt] repos[{i}] must be an object (with 'name' and 'url')")
+                        continue
+                    if "name" not in repo or not isinstance(repo.get("name"), str):
+                        errors.append(f"[apt] repos[{i}] missing required string field: 'name'")
+                    if "url" not in repo or not isinstance(repo.get("url"), str):
+                        errors.append(f"[apt] repos[{i}] missing required string field: 'url'")
+                    if repo.get("gpg_key") and not has_gpg_tool:
+                        errors.append(
+                            f"[apt] repos[{i}]['{repo['name']}'] has 'gpg_key' but 'gpg' is not installed"
+                        )
+                    if repo.get("gpg_key") and not has_download_tool:
+                        errors.append(
+                            f"[apt] repos[{i}]['{repo['name']}'] has 'gpg_key' but neither 'curl' nor 'wget' is installed"
+                        )
         return errors
 
     def pack(self, task_spec: dict[str, Any], ctx: PackContext) -> PluginResult:
         packages: list[str] = task_spec.get("packages", [])
-        deb_dir = ctx.bundle_dir / "apt" / "debs"
+        repos: list[dict[str, Any]] = task_spec.get("repos", [])
+        apt_dir = ctx.bundle_dir / "apt"
+        deb_dir = apt_dir / "debs"
+        keys_dir = apt_dir / "keys"
         deb_dir.mkdir(parents=True, exist_ok=True)
 
         if ctx.dry_run:
-            return PluginResult(
-                success=True,
-                message=f"[dry-run] Would download {len(packages)} package(s) + dependencies",
-                artifacts=[],
-                errors=[],
-            )
+            msg = f"[dry-run] Would download {len(packages)} package(s) + dependencies"
+            if repos:
+                repo_names = ", ".join(r.get("name", "?") for r in repos)
+                msg += f" from repos: {repo_names}"
+            return PluginResult(success=True, message=msg, artifacts=[], errors=[])
 
         errors: list[str] = []
         all_pkgs: set[str] = set()
+        temp_sources: str | None = None
+        extra_opts: list[str] = []
 
-        # 1. Resolve recursive dependencies for each package
-        if ctx.verbose:
-            from rich import print as rprint
+        # ── Phase 0: Process upstream repos ─────────────────────────────────
+        if repos:
+            keys_dir.mkdir(exist_ok=True)
+            temp_sources = tempfile.mkdtemp(prefix="syncit-apt-")
 
-            rprint(f"[cyan]→[/] Resolving dependencies for: {' '.join(packages)}...")
-
-        for pkg in packages:
-            dep_cmd = [
-                "apt-cache",
-                "depends",
-                "--recurse",
-                "--no-recommends",
-                "--no-suggests",
-                "--no-conflicts",
-                "--no-breaks",
-                "--no-replaces",
-                "--no-enhances",
-                pkg,
-            ]
-            dep_res = _run(dep_cmd)
-            if dep_res.returncode != 0:
-                errors.append(
-                    f"[apt] apt-cache depends failed for '{pkg}': {dep_res.stderr.strip()}"
-                )
-                continue
-
-            all_pkgs.add(pkg)
-            for line in dep_res.stdout.splitlines():
-                line = line.strip()
-                if ">" in line or "<" in line:
-                    continue
-                if line.startswith("|"):
-                    continue
-                if ":any" in line or ":native" in line:
-                    continue
-                line = line.removeprefix("Depends:").removeprefix("PreDepends:").strip()
-                if not line:
-                    continue
-                name = line.split()[0]
-                if re.match(r"^[a-z0-9][a-z0-9.+\-]+$", name):
-                    all_pkgs.add(name)
-
-        if not all_pkgs and errors:
-            return PluginResult(
-                success=False, message="Dependency resolution failed", artifacts=[], errors=errors
-            )
-
-        sorted_pkgs = sorted(list(all_pkgs))
-        total_dl = len(sorted_pkgs)
-        if ctx.verbose:
-            rprint(f"[cyan]→[/] Resolved {total_dl} packages (including transitive deps)")
-
-        # 2. Download all resolved packages with caching
-        cache_dir = Path("~/.cache/syncit/apt").expanduser()
-        cache_dir.mkdir(parents=True, exist_ok=True)
-
-        for i, p in enumerate(sorted_pkgs, start=1):
             if ctx.verbose:
-                rprint(f"[cyan]→[/] Processing: {p} ({i}/{total_dl})...")
+                from rich import print as rprint
 
-            # Resolve exact filename for cache check
-            # Format: name_version_arch.deb (with epoch : replaced by %3a)
-            pkg_info = _run(["apt-cache", "show", p])
-            if pkg_info.returncode != 0:
-                errors.append(f"[apt] apt-cache show failed for '{p}'")
-                continue
+                rprint(f"[cyan]→[/] Processing {len(repos)} upstream repo(s)...")
 
-            ver, arch = "", ""
-            for line in pkg_info.stdout.splitlines():
-                if line.startswith("Version: "):
-                    ver = line.split(": ", 1)[1]
-                if line.startswith("Architecture: "):
-                    arch = line.split(": ", 1)[1]
-                if ver and arch:
-                    break
+            for repo in repos:
+                name = repo.get("name", "repo")
+                repo_url = repo.get("url", "")
 
-            deb_filename = f"{p}_{ver.replace(':', '%3a')}_{arch}.deb"
-            cache_path = cache_dir / deb_filename
+                # Download GPG key into bundle for audit trail
+                gpg_key_url = repo.get("gpg_key")
+                if gpg_key_url:
+                    key_dest = keys_dir / f"{name}.gpg"
+                    if not key_dest.exists() or ctx.no_cache:
+                        try:
+                            if ctx.verbose:
+                                rprint(f"    [dim]Downloading GPG key for '{name}'...[/dim]")
+                            urllib.request.urlretrieve(gpg_key_url, str(key_dest))
+                            # Check if ASCII-armored and dearmor if so
+                            raw = key_dest.read_bytes()
+                            if raw.startswith(b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
+                                armored = key_dest.with_suffix(".gpg.asc")
+                                key_dest.rename(armored)
+                                _run(
+                                    ["gpg", "--dearmor", "--yes", "-o", str(key_dest), str(armored)]
+                                )
+                                armored.unlink(missing_ok=True)
+                        except Exception as exc:
+                            errors.append(
+                                f"[apt] Failed to download GPG key for repo '{name}': {exc}"
+                            )
 
-            if not ctx.no_cache and cache_path.exists():
+                # Inject [trusted=yes] so apt doesn't require GPG verification during download only
+                # The GPG key is stored in the bundle for offline use / audit
+                entry = repo_url
+                if "[trusted=yes]" not in entry and "[trusted=yes" not in entry:
+                    # Insert after 'deb' (with or without options already)
+                    if entry.strip().startswith("deb ["):
+                        # Already has options — insert trusted=yes
+                        entry = entry.replace("deb [", "deb [trusted=yes ", 1)
+                    else:
+                        entry = entry.replace("deb ", "deb [trusted=yes] ", 1)
+
+                (Path(temp_sources) / f"{name}.list").write_text(entry + "\n")
                 if ctx.verbose:
-                    rprint(f"    [dim]Using cached: {deb_filename}[/dim]")
-            else:
-                if ctx.verbose:
-                    action = "Forced re-download" if ctx.no_cache else "Downloading"
-                    rprint(f"    [dim]{action}: {p}...[/dim]")
-                dl_res = _run(["apt-get", "download", p], cwd=str(cache_dir))
-                if dl_res.returncode != 0:
+                    rprint(f"    [dim]Added repo '{name}' for pack[/dim]")
+
+            # Also include system sources.d so base OS repos resolve transitive deps
+            sys_sources_d = Path("/etc/apt/sources.list.d")
+            if sys_sources_d.exists():
+                for f in sys_sources_d.glob("*.list"):
+                    shutil.copy2(str(f), str(Path(temp_sources) / f.name))
+                # Ubuntu 24.04+ uses deb822 .sources format
+                for f in sys_sources_d.glob("*.sources"):
+                    shutil.copy2(str(f), str(Path(temp_sources) / f.name))
+
+            extra_opts = [
+                "-o",
+                f"Dir::Etc::SourceParts={temp_sources}",
+                "-o",
+                "Dir::Etc::SourceList=/etc/apt/sources.list",
+            ]
+
+            # apt-get update with combined sources so the cache knows about custom repos
+            upd = _run(["apt-get", "update"] + extra_opts, timeout=120)
+            if upd.returncode != 0:
+                errors.append(
+                    f"[apt] apt-get update failed with custom repos: {upd.stderr.strip()}"
+                )
+
+        try:
+            # ── Phase 1: Resolve recursive dependencies for each package ──
+            if ctx.verbose:
+                from rich import print as rprint
+
+                rprint(f"[cyan]→[/] Resolving dependencies for: {' '.join(packages)}...")
+
+            for pkg in packages:
+                dep_cmd = [
+                    "apt-cache",
+                    "depends",
+                    "--recurse",
+                    "--no-recommends",
+                    "--no-suggests",
+                    "--no-conflicts",
+                    "--no-breaks",
+                    "--no-replaces",
+                    "--no-enhances",
+                    pkg,
+                ] + extra_opts
+                dep_res = _run(dep_cmd)
+                if dep_res.returncode != 0:
                     errors.append(
-                        f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}"
+                        f"[apt] apt-cache depends failed for '{pkg}': {dep_res.stderr.strip()}"
                     )
                     continue
 
-            # Copy from cache to bundle debs dir
-            if cache_path.exists():
-                shutil.copy2(str(cache_path), str(deb_dir / deb_filename))
-            else:
-                # Fallback: maybe the filename was different than expected?
-                # Find the most recently modified .deb in cache_dir starting with p_
-                cand = list(cache_dir.glob(f"{p}_*.deb"))
-                if cand:
-                    latest = max(cand, key=lambda x: x.stat().st_mtime)
-                    shutil.copy2(str(latest), str(deb_dir / latest.name))
-                else:
-                    errors.append(f"[apt] Could not find downloaded .deb for '{p}' in cache")
+                all_pkgs.add(pkg)
+                for line in dep_res.stdout.splitlines():
+                    line = line.strip()
+                    if ">" in line or "<" in line:
+                        continue
+                    if line.startswith("|"):
+                        continue
+                    if ":any" in line or ":native" in line:
+                        continue
+                    line = line.removeprefix("Depends:").removeprefix("PreDepends:").strip()
+                    if not line:
+                        continue
+                    name = line.split()[0]
+                    if re.match(r"^[a-z0-9][a-z0-9.+\-]+$", name):
+                        all_pkgs.add(name)
 
-        # 3. Generate Packages index
-        if ctx.verbose:
-            rprint("[cyan]→[/] Generating Packages index...")
-
-        packages_file = deb_dir / "Packages"
-        sources_file = ctx.bundle_dir / "apt" / "sources.list"
-        codename_file = ctx.bundle_dir / "apt" / "pack_codename"
-
-        idx_cmd = ["dpkg-scanpackages", ".", "/dev/null"]
-        idx_res = _run(idx_cmd, cwd=str(deb_dir))
-
-        if idx_res.returncode != 0:
-            errors.append(f"[apt] dpkg-scanpackages failed: {idx_res.stderr.strip()}")
-        elif not idx_res.stdout.strip():
-            # If we resolved packages but scanpackages found nothing, that's an error
-            if all_pkgs:
-                errors.append(
-                    "[apt] dpkg-scanpackages produced empty index despite finding packages. Ensure .deb files were downloaded."
+            if not all_pkgs and errors:
+                return PluginResult(
+                    success=False,
+                    message="Dependency resolution failed",
+                    artifacts=[],
+                    errors=errors,
                 )
-        else:
-            # Write the package index canonically inside debs/ (so the path is the same as the files)
-            packages_file.write_text(idx_res.stdout)
-            import gzip
 
-            with gzip.open(str(deb_dir / "Packages.gz"), "wt") as f:
-                f.write(idx_res.stdout)
+            sorted_pkgs = sorted(list(all_pkgs))
+            total_dl = len(sorted_pkgs)
+            if ctx.verbose:
+                rprint(f"[cyan]→[/] Resolved {total_dl} packages (including transitive deps)")
 
-        # 4. Write sources.list fragment (primarily for local apply)
-        if ctx.verbose:
-            rprint("[cyan]→[/] Writing sources.list...")
-        # Using a relative path that local apply can resolve or override
-        sources_file.write_text("deb [trusted=yes] file://./debs ./\n")
+            # ── Phase 2: Download all resolved packages with caching ──────
+            cache_dir = Path("~/.cache/syncit/apt").expanduser()
+            cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # 5. Record target codename for mismatch warning on apply
-        codename_file.write_text(_detect_codename())
+            for i, p in enumerate(sorted_pkgs, start=1):
+                if ctx.verbose:
+                    rprint(f"[cyan]→[/] Processing: {p} ({i}/{total_dl})...")
 
-        artifacts = [str(deb_dir), str(packages_file), str(sources_file)]
-        success = len(errors) == 0
-        if ctx.verbose and success:
-            rprint(f"[green]✓[/] apt: {total_dl} packages downloaded")
+                pkg_info = _run(["apt-cache", "show", p] + extra_opts)
+                if pkg_info.returncode != 0:
+                    errors.append(f"[apt] apt-cache show failed for '{p}'")
+                    continue
 
-        msg = "apt packed successfully" if success else f"apt packed with {len(errors)} error(s)"
-        return PluginResult(success=success, message=msg, artifacts=artifacts, errors=errors)
+                ver, arch = "", ""
+                for line in pkg_info.stdout.splitlines():
+                    if line.startswith("Version: "):
+                        ver = line.split(": ", 1)[1]
+                    if line.startswith("Architecture: "):
+                        arch = line.split(": ", 1)[1]
+                    if ver and arch:
+                        break
+
+                deb_filename = f"{p}_{ver.replace(':', '%3a')}_{arch}.deb"
+                cache_path = cache_dir / deb_filename
+
+                if not ctx.no_cache and cache_path.exists():
+                    if ctx.verbose:
+                        rprint(f"    [dim]Using cached: {deb_filename}[/dim]")
+                else:
+                    if ctx.verbose:
+                        action = "Forced re-download" if ctx.no_cache else "Downloading"
+                        rprint(f"    [dim]{action}: {p}...[/dim]")
+                    dl_res = _run(["apt-get", "download", p] + extra_opts, cwd=str(cache_dir))
+                    if dl_res.returncode != 0:
+                        errors.append(
+                            f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}"
+                        )
+                        continue
+
+                # Copy from cache to bundle debs dir
+                if cache_path.exists():
+                    shutil.copy2(str(cache_path), str(deb_dir / deb_filename))
+                else:
+                    cand = list(cache_dir.glob(f"{p}_*.deb"))
+                    if cand:
+                        latest = max(cand, key=lambda x: x.stat().st_mtime)
+                        shutil.copy2(str(latest), str(deb_dir / latest.name))
+                    else:
+                        errors.append(f"[apt] Could not find downloaded .deb for '{p}' in cache")
+
+            # ── Phase 3: Generate Packages index ──────────────────────────
+            if ctx.verbose:
+                rprint("[cyan]→[/] Generating Packages index...")
+
+            packages_file = deb_dir / "Packages"
+            sources_file = apt_dir / "sources.list"
+            codename_file = apt_dir / "pack_codename"
+
+            idx_cmd = ["dpkg-scanpackages", ".", "/dev/null"]
+            idx_res = _run(idx_cmd, cwd=str(deb_dir))
+
+            if idx_res.returncode != 0:
+                errors.append(f"[apt] dpkg-scanpackages failed: {idx_res.stderr.strip()}")
+            elif not idx_res.stdout.strip():
+                if all_pkgs:
+                    errors.append(
+                        "[apt] dpkg-scanpackages produced empty index despite finding packages. "
+                        "Ensure .deb files were downloaded."
+                    )
+            else:
+                packages_file.write_text(idx_res.stdout)
+                import gzip
+
+                with gzip.open(str(deb_dir / "Packages.gz"), "wt") as pkg_gz:
+                    pkg_gz.write(idx_res.stdout)
+
+            # ── Phase 4: Write sources.list fragment (for local apply) ────
+            if ctx.verbose:
+                rprint("[cyan]→[/] Writing sources.list...")
+            sources_file.write_text("deb [trusted=yes] file://./debs ./\n")
+
+            # ── Phase 5: Record target codename ──────────────────────────
+            codename_file.write_text(_detect_codename())
+
+            # ── Phase 6: Persist repo metadata for audit / diff ──────────
+            if repos:
+                meta = []
+                for repo in repos:
+                    repo_entry: dict[str, Any] = {
+                        "name": repo["name"],
+                        "url": repo["url"],
+                    }
+                    if repo.get("gpg_key"):
+                        repo_entry["gpg_key"] = {
+                            "url": repo["gpg_key"],
+                            "bundle_path": f"apt/keys/{repo['name']}.gpg",
+                        }
+                    meta.append(repo_entry)
+                (apt_dir / "repos.json").write_text(json.dumps(meta, indent=2))
+
+            artifacts = [str(deb_dir), str(packages_file), str(sources_file)]
+            success = len(errors) == 0
+            if ctx.verbose and success:
+                rprint(f"[green]✓[/] apt: {total_dl} packages downloaded")
+
+            msg = (
+                "apt packed successfully" if success else f"apt packed with {len(errors)} error(s)"
+            )
+            return PluginResult(success=success, message=msg, artifacts=artifacts, errors=errors)
+
+        finally:
+            # Cleanup temp sources directory
+            if temp_sources is not None:
+                shutil.rmtree(temp_sources, ignore_errors=True)
 
     def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
         bundle_apt = ctx.bundle_dir / "apt"
@@ -327,19 +457,35 @@ class AptPlugin(OfflinePlugin):
     def diff(self, old_spec: dict[str, Any] | None, new_spec: dict[str, Any]) -> DiffResult:
         if old_spec is None:
             new_pkgs = new_spec.get("packages", [])
+            new_repos = new_spec.get("repos", [])
+            added = [f"[repo] {r['name']} ({r.get('url', '')})" for r in new_repos] + new_pkgs
             return DiffResult(
-                plugin_name=self.name, added=new_pkgs, removed=[], updated=[], unchanged=[]
+                plugin_name=self.name, added=added, removed=[], updated=[], unchanged=[]
             )
 
-        old_set = set(old_spec.get("packages", []))
-        new_set = set(new_spec.get("packages", []))
+        # Compare repos
+        old_repos = {(r.get("name", ""), r.get("url", "")) for r in old_spec.get("repos", [])}
+        new_repos = {(r.get("name", ""), r.get("url", "")) for r in new_spec.get("repos", [])}
+
+        added_repos = sorted(new_repos - old_repos)
+        removed_repos = sorted(old_repos - new_repos)
+
+        added = [f"[repo] {n} ({u})" for n, u in added_repos]
+        removed = [f"[repo] {n} ({u})" for n, u in removed_repos]
+
+        # Compare packages
+        old_pkgs = set(old_spec.get("packages", []))
+        new_pkgs = set(new_spec.get("packages", []))
+
+        added += sorted(new_pkgs - old_pkgs)
+        removed += sorted(old_pkgs - new_pkgs)
 
         return DiffResult(
             plugin_name=self.name,
-            added=sorted(new_set - old_set),
-            removed=sorted(old_set - new_set),
+            added=added,
+            removed=removed,
             updated=[],
-            unchanged=sorted(old_set & new_set),
+            unchanged=sorted(old_pkgs & new_pkgs),
         )
 
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:

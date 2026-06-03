@@ -1,0 +1,22 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-dev \
+    dpkg-dev \
+    curl \
+    gpg \
+    ca-certificates \
+    git \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV UV_LINK_MODE=copy
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+
+CMD ["bash"]

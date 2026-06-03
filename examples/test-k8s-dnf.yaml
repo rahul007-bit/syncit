@@ -1,0 +1,25 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: k8s-offline-dnf
+  version: "1.31.0"
+  description: "Kubernetes v1.31 bundle via dnf (for RHEL/Rocky/CentOS targets)"
+
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+
+  tasks:
+    - name: Install Kubernetes packages via DNF
+      plugin: dnf
+      repos:
+        - name: kubernetes
+          baseurl: https://pkgs.k8s.io/core:/stable:/v1.31/rpm/
+          gpgcheck: yes
+          gpgkey: https://pkgs.k8s.io/core:/stable:/v1.31/rpm/repodata/repomd.xml.key
+      packages:
+        - kubelet.x86_64
+        - kubeadm.x86_64
+        - kubectl.x86_64

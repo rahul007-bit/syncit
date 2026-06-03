@@ -11,6 +11,8 @@ from rich.console import Console
 # Import plugins to ensure they register themselves
 import syncit.plugins.apt  # noqa: F401
 import syncit.plugins.cargo  # noqa: F401
+import syncit.plugins.dnf  # noqa: F401
+import syncit.plugins.file  # noqa: F401
 import syncit.plugins.go  # noqa: F401
 import syncit.plugins.npm  # noqa: F401
 import syncit.plugins.oci_image  # noqa: F401

@@ -151,8 +151,13 @@ cython_debug/
 
 # Project specific ignores
 bundle-*/
+bundles/
+bundle-*.tar.gz
+*.tar.gz
 /tmp-bundle/
 state.json
 /apt/
 /pip/
 /images/
+.kilo/
+graphify-out/

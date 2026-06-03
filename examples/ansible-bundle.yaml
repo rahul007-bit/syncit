@@ -1,0 +1,18 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: ansible-offline
+  version: "1.0.0"
+  description: "Offline bundle for ansible RPM and its deps"
+
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+
+  tasks:
+    - name: Install ansible via DNF
+      plugin: dnf
+      packages:
+        - ansible

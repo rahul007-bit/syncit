@@ -1,0 +1,54 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: k8s-offline
+  version: "1.35.5"
+  description: "Offline bundle for K8s v1.35.5, Helm, CRI-O, and Istio 1.29.3"
+
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+
+  tasks:
+    - name: Install Kubernetes & CRI-O packages via DNF
+      plugin: dnf
+      packages:
+        - kubelet.x86_64
+        - kubeadm.x86_64
+        - kubectl.x86_64
+        - cri-o.x86_64
+        - podman.x86_64
+
+    - name: Download Helm & Istio binaries
+      plugin: file
+      files:
+        - url: "https://get.helm.sh/helm-v3.15.4-linux-amd64.tar.gz"
+          dest: "/usr/local/bin"
+          extract: true
+          strip_components: 1
+        - url: "https://github.com/istio/istio/releases/download/1.29.3/istio-1.29.3-linux-amd64.tar.gz"
+          dest: "/opt/istio"
+          extract: true
+          strip_components: 1
+
+    - name: Pull Kubernetes & Istio container images
+      plugin: oci_image
+      images:
+        # Kubernetes v1.35.5 components
+        - source: registry.k8s.io/kube-apiserver:v1.35.5
+        - source: registry.k8s.io/kube-controller-manager:v1.35.5
+        - source: registry.k8s.io/kube-scheduler:v1.35.5
+        - source: registry.k8s.io/kube-proxy:v1.35.5
+        - source: registry.k8s.io/coredns/coredns:v1.13.1
+        - source: registry.k8s.io/pause:3.10.1
+        - source: registry.k8s.io/etcd:3.6.6-0
+        # Istio v1.29.3 components (Note: istio/operator is deprecated and not published for 1.29.x)
+        - source: docker.io/istio/pilot:1.29.3
+        - source: docker.io/istio/proxyv2:1.29.3
+        - source: docker.io/istio/install-cni:1.29.3
+        - source: docker.io/istio/ztunnel:1.29.3
+        # Flannel CNI
+        - source: ghcr.io/flannel-io/flannel:v0.28.3
+        - source: ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel1

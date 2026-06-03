@@ -115,26 +115,27 @@ class DnfPlugin(OfflinePlugin):
                 print(f"[dnf] Processing {len(repos)} upstream repo(s)...")
 
             for repo in repos:
-                name = repo.get("name", "repo")
-                name = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
+                raw_name = repo.get("name", "repo")
+                # Prefix with 'syncit_' to avoid colliding with any repo of the
+                # same name already present in /etc/yum.repos.d/ on the build host.
+                name = "syncit_" + re.sub(r"[^a-zA-Z0-9._-]", "_", raw_name)
                 baseurl = repo.get("baseurl", "")
 
-                # Download GPG key into bundle for audit trail
+                # GPG key: record in repos.json for audit trail but do NOT
+                # download during pack — keys are only needed at install time
+                # (gpgcheck), not during `dnf download`. Some providers (e.g.
+                # pkgs.k8s.io) return 403 on direct key URL requests.
                 gpgkey_url = repo.get("gpgkey")
-                if gpgkey_url:
-                    try:
-                        key_dest = keys_dir / f"{name}.key"
-                        if not key_dest.exists() or ctx.no_cache:
-                            if ctx.verbose:
-                                print(f"    [dnf] Downloading GPG key for '{name}'...")
-                            if not (gpgkey_url.startswith("http://") or gpgkey_url.startswith("https://")):
-                                raise ValueError(f"Invalid URL scheme (only http/https allowed): {gpgkey_url}")
-                            urllib.request.urlretrieve(gpgkey_url, str(key_dest))
-                    except Exception as exc:
-                        errors.append(f"[dnf] Failed to download GPG key for repo '{name}': {exc}")
+                if gpgkey_url and ctx.verbose:
+                    print(f"    [dnf] GPG key noted for '{raw_name}' (not downloaded at pack time)")
 
-                # Add repo via --repofrompath (no system mutation)
+                # Inject repo via --repofrompath (no system mutation).
+                # The repo ID (first token) uses our 'syncit_'-prefixed name so
+                # it never conflicts with a system repo of the same name.
                 extra_repo_opts.extend(["--repofrompath", f"{name},{baseurl}"])
+                # Enable only our injected repos; disable all system repos so
+                # the build host's /etc/yum.repos.d/ doesn't interfere.
+                extra_repo_opts.extend(["--enablerepo", name])
                 if ctx.verbose:
                     print(f"    [dnf] Added repo '{name}' ({baseurl})")
 
@@ -185,6 +186,13 @@ class DnfPlugin(OfflinePlugin):
         pre_download_rpms = {f.name for f in cache_dir.iterdir() if f.is_file() and f.suffix == ".rpm"}
 
         dl_cmd = ["dnf", "download", "--resolve", "--destdir", str(cache_dir)]
+
+        # If the user declared custom repos, disable all system repos and rely
+        # only on those injected repos. This prevents conflicts like
+        # 'Repository kubernetes is listed more than once' when the build host
+        # already has a system-level kubernetes.repo in /etc/yum.repos.d/.
+        if repos:
+            dl_cmd.insert(2, "--disablerepo=*")
 
         if base_installroot:
             installroot_path = Path(base_installroot).expanduser().resolve()

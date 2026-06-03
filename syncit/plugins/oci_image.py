@@ -208,18 +208,38 @@ class OciImagePlugin(OfflinePlugin):
                     print(f"[oci_image] Skipping already-loaded: {source}")
                 continue
 
-            if runtime == "docker":
-                cmd = ["docker", "load", "-i", str(archive)]
-            elif runtime == "podman":
-                cmd = ["podman", "load", "-i", str(archive)]
-            else:  # ctr
-                cmd = ["ctr", "images", "import", str(archive)]
+            # Prefer skopeo copy for loading — it correctly maps the full
+            # reference (including registry prefix) into the runtime store,
+            # avoiding the <none>:<none> issue that `podman/docker load` can
+            # produce with oci-archive tars.
+            if _has_cmd("skopeo") and runtime in ("docker", "podman"):
+                storage_driver = "containers-storage" if runtime == "podman" else "docker-daemon"
+                cmd = [
+                    "skopeo", "copy",
+                    f"oci-archive:{archive}",
+                    f"{storage_driver}:{source}",
+                ]
+                result = _run(cmd)
+                if result.returncode != 0:
+                    errors.append(
+                        f"[oci_image] skopeo copy failed for '{source}': {result.stderr.strip()}\n"
+                        f"Falling back to {runtime} load + tag..."
+                    )
+                    # Fallback: runtime load then explicit tag
+                    result = self._load_and_tag(runtime, archive, source, ctx.verbose)
+                    if result:
+                        errors.append(result)
+            else:
+                # ctr or no skopeo: runtime native load then explicit tag
+                err = self._load_and_tag(runtime, archive, source, ctx.verbose)
+                if err:
+                    errors.append(err)
 
-            result = _run(cmd)
-            if result.returncode != 0:
+            # Verify image is now accessible under expected name
+            if not self._image_exists(runtime, source, ""):
                 errors.append(
-                    f"[oci_image] Failed to load '{source}'\n"
-                    f"Command: {' '.join(cmd)}\n{result.stderr.strip()}"
+                    f"[oci_image] WARNING: '{source}' loaded but not found under that name. "
+                    f"Verify with: {runtime} images | grep {source.split('/')[-1].split(':')[0]}"
                 )
 
         success = len(errors) == 0
@@ -233,6 +253,57 @@ class OciImagePlugin(OfflinePlugin):
             artifacts=[str(image_dir)],
             errors=errors,
         )
+
+    def _load_and_tag(self, runtime: str, archive: Path, source: str, verbose: bool) -> str | None:
+        """Load an oci-archive with runtime load, then explicitly tag it with the source reference.
+
+        This is a fallback for when skopeo is not available. `podman/docker load`
+        may drop the registry prefix from the reference, leaving images as
+        <none>:<none> or with a truncated name. We fix this by tagging explicitly.
+        Returns an error string on failure, or None on success.
+        """
+        if runtime == "docker":
+            load_cmd = ["docker", "load", "-i", str(archive)]
+        elif runtime == "podman":
+            load_cmd = ["podman", "load", "-i", str(archive)]
+        else:  # ctr
+            load_cmd = ["ctr", "images", "import", str(archive)]
+            result = _run(load_cmd)
+            if result.returncode != 0:
+                return f"[oci_image] ctr import failed for '{source}': {result.stderr.strip()}"
+            return None
+
+        result = _run(load_cmd)
+        if result.returncode != 0:
+            return f"[oci_image] {runtime} load failed for '{source}': {result.stderr.strip()}"
+
+        # Extract the loaded image name from output (e.g. "Loaded image: sha256:abc..."
+        # or "Loaded image ID: sha256:abc..." or the tag podman printed)
+        loaded_ref: str | None = None
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("Loaded image:"):
+                loaded_ref = line.split(":", 1)[1].strip()
+                break
+            if line.startswith("Loaded image ID:"):
+                loaded_ref = line.split(":", 2)[-1].strip()  # sha256 hash
+                break
+
+        if loaded_ref and loaded_ref != source:
+            # The runtime gave the image a different name (or a raw sha256).
+            # Explicitly tag it with the expected source reference.
+            if verbose:
+                print(f"[oci_image] Tagging '{loaded_ref}' → '{source}'")
+            tag_cmd = [runtime, "tag", loaded_ref, source]
+            tag_result = _run(tag_cmd)
+            if tag_result.returncode != 0:
+                return (
+                    f"[oci_image] Loaded '{source}' but failed to tag: {tag_result.stderr.strip()}. "
+                    f"Image may be available as '{loaded_ref}' instead."
+                )
+
+        return None
+
 
     def _image_exists(self, runtime: str, source: str, digest: str) -> bool:
         """Check if an image is already present in the local runtime."""
@@ -274,28 +345,52 @@ class OciImagePlugin(OfflinePlugin):
         )
 
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
+        # Read the manifest entries so we can generate explicit skopeo/tag commands
+        # rather than a generic glob loop. This is critical to avoid <none>:<none>
+        # images caused by `podman load` dropping registry prefixes from oci-archives.
+        images: list[dict] = task_spec.get("images", [])
+
+        load_lines: list[str] = []
+        for img in images:
+            source = img["source"]
+            safe = _safe_name(source)
+            tar = f"$BUNDLE_DIR/{bundle_subdir}/images/{safe}.tar"
+            # skopeo path (preferred — correctly maps full reference into runtime store)
+            load_lines.append(
+                f'  if command -v skopeo &>/dev/null; then\n'
+                f'    echo "  [oci_image] → skopeo copy {source}"\n'
+                f'    skopeo copy "oci-archive:{tar}" "$STORAGE_PREFIX:{source}"\n'
+                f'  else\n'
+                f'    echo "  [oci_image] → $RUNTIME load {source}"\n'
+                f'    LOADED=$($RUNTIME load -i "{tar}" 2>&1 | grep -oP "(?<=Loaded image: ).*" | head -1)\n'
+                f'    [ -n "$LOADED" ] && [ "$LOADED" != "{source}" ] && $RUNTIME tag "$LOADED" "{source}"\n'
+                f'  fi'
+            )
+
+        per_image_block = "\n".join(load_lines)
+
         return f"""
 echo "[oci_image] Loading container images..."
-if command -v docker &> /dev/null; then
+if command -v docker &>/dev/null; then
     RUNTIME="docker"
-    LOAD_ARGS="load -i"
-elif command -v podman &> /dev/null; then
+    STORAGE_PREFIX="docker-daemon"
+elif command -v podman &>/dev/null; then
     RUNTIME="podman"
-    LOAD_ARGS="load -i"
-elif command -v ctr &> /dev/null; then
+    STORAGE_PREFIX="containers-storage"
+elif command -v ctr &>/dev/null; then
     RUNTIME="ctr"
-    LOAD_ARGS="images import"
+    STORAGE_PREFIX=""
 else
     echo "[oci_image] ERROR: No container runtime found (docker, podman, ctr)"
     exit 1
 fi
 
-for archive in $BUNDLE_DIR/{bundle_subdir}/images/*.tar; do
-    if [ -f "$archive" ]; then
-        echo "  → Loading $archive..."
-        $RUNTIME $LOAD_ARGS "$archive"
-    fi
-done
+# Load each image individually with its exact reference preserved.
+# Using skopeo copy (preferred) avoids the <none>:<none> tag problem
+# that occurs when podman/docker load drops registry prefixes from
+# oci-archive tars. Falls back to runtime load + explicit tag if
+# skopeo is not available.
+{per_image_block}
 """
 
 

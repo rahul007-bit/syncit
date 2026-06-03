@@ -1,0 +1,35 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: k8s-offline
+  version: "1.35.5"
+  description: "Offline bundle for K8s v1.35.5 and CRI-O on RHEL 9"
+
+spec:
+  targets:
+    distro: rhel
+    codename: "9"
+    arch: amd64
+
+  tasks:
+    - name: Install Kubernetes & CRI-O packages via DNF
+      plugin: dnf
+      packages:
+        - kubelet-1.35.5
+        - kubeadm-1.35.5
+        - kubectl-1.35.5
+        - cri-o
+        - podman
+        - buildah
+        - containernetworking-plugins
+        - conntrack-tools
+        - socat
+        - tc
+        - iproute-tc
+      repos:
+        - name: kubernetes
+          baseurl: "https://pkgs.k8s.io/core:/stable:/v1.35/rpm/"
+          gpgkey: "https://pkgs.k8s.io/core:/stable:/v1.35/rpm/repodata/repomd.xml.key"
+        - name: cri-o
+          baseurl: "https://pkgs.k8s.io/addons:/cri-o:/stable:/v1.35/rpm/"
+          gpgkey: "https://pkgs.k8s.io/addons:/cri-o:/stable:/v1.35/rpm/repodata/repomd.xml.key"

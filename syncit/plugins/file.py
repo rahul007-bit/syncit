@@ -68,6 +68,8 @@ class FilePlugin(OfflinePlugin):
                 cache_path = cache_dir / filename
 
                 if ctx.no_cache or not cache_path.exists():
+                    if not (url.startswith("http://") or url.startswith("https://")):
+                        raise ValueError(f"Invalid URL scheme (only http/https allowed): {url}")
                     urllib.request.urlretrieve(url, cache_path)
 
                 shutil.copy2(cache_path, target_path)
@@ -96,6 +98,11 @@ class FilePlugin(OfflinePlugin):
             filename = url.split("/")[-1]
             src_path = file_dir / filename
             dest_path = Path(f["dest"]).expanduser()
+            import os
+            if not os.path.abspath(dest_path).startswith("/srv/offline"):
+                import sys
+                print(f"[file] WARNING: Writing to arbitrary path {dest_path}", file=sys.stderr)
+
             extract_flag = f.get("extract", False)
             strip_components = f.get("strip_components", 0)
 
@@ -185,6 +192,10 @@ class FilePlugin(OfflinePlugin):
             url = f["url"]
             filename = url.split("/")[-1]
             dest = f["dest"]
+            import os
+            from pathlib import Path
+            if not os.path.abspath(Path(dest).expanduser()).startswith("/srv/offline"):
+                lines.append(f"echo '[file] WARNING: Writing to arbitrary path {dest}' >&2")
             exec_flag = f.get("executable", False)
             extract_flag = f.get("extract", False)
             strip_components = f.get("strip_components", 0)

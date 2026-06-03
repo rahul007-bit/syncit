@@ -42,7 +42,8 @@ class NpmPlugin(OfflinePlugin):
 
         projects = task_spec.get("projects", [])
         for task in projects:
-            proj_name = task["project_name"]
+            import re
+            proj_name = re.sub(r"[/\\]", "_", task["project_name"])
             proj_dir = Path(task["project_dir"]).expanduser().resolve()
 
             if not (proj_dir / "package.json").exists():
@@ -157,12 +158,14 @@ class NpmPlugin(OfflinePlugin):
 
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         lines = [f'echo "[npm] Applying node_modules..."']
+        import shlex
         for task in task_spec.get("projects", []):
-            proj_name = task["project_name"]
+            import re
+            proj_name = re.sub(r"[/\\]", "_", task["project_name"])
             proj_dir = task["project_dir"]
-            lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{proj_name}/node_modules {proj_dir}/")
-            lines.append(f"echo 'offline=true' >> {proj_dir}/.npmrc")
-            lines.append(f"echo 'prefer-offline=true' >> {proj_dir}/.npmrc")
+            lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/node_modules {shlex.quote(proj_dir)}/")
+            lines.append(f"echo 'offline=true' >> {shlex.quote(proj_dir)}/.npmrc")
+            lines.append(f"echo 'prefer-offline=true' >> {shlex.quote(proj_dir)}/.npmrc")
         return "\\n".join(lines) + "\\n"
 
 

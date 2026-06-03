@@ -42,7 +42,8 @@ class CargoPlugin(OfflinePlugin):
 
         projects = task_spec.get("projects", [])
         for task in projects:
-            proj_name = task["project_name"]
+            import re
+            proj_name = re.sub(r"[/\\]", "_", task["project_name"])
             proj_dir = Path(task["project_dir"]).expanduser().resolve()
 
             if not (proj_dir / "Cargo.toml").exists():
@@ -161,13 +162,15 @@ directory = "vendor"
 
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         lines = [f'echo "[cargo] Applying rust vendored dependencies..."']
+        import shlex
         for task in task_spec.get("projects", []):
-            proj_name = task["project_name"]
+            import re
+            proj_name = re.sub(r"[/\\]", "_", task["project_name"])
             proj_dir = task["project_dir"]
-            lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{proj_name}/vendor {proj_dir}/vendor")
-            lines.append(f"mkdir -p {proj_dir}/.cargo")
+            lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/vendor {shlex.quote(proj_dir)}/vendor")
+            lines.append(f"mkdir -p {shlex.quote(proj_dir)}/.cargo")
             lines.append(
-                f"cat $BUNDLE_DIR/{bundle_subdir}/{proj_name}/config.toml.snippet >> {proj_dir}/.cargo/config.toml"
+                f"cat $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/config.toml.snippet >> {shlex.quote(proj_dir)}/.cargo/config.toml"
             )
         return "\\n".join(lines) + "\\n"
 

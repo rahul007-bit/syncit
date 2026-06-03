@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -54,6 +55,13 @@ class DnfPlugin(OfflinePlugin):
         for idx, pkg in enumerate(packages):
             if not isinstance(pkg, str):
                 errors.append(f"[dnf] task {idx} must be a package string")
+
+        if "base_installroot" in task_spec:
+            if not isinstance(task_spec["base_installroot"], str):
+                errors.append("[dnf] 'base_installroot' must be a string path")
+
+        if "releasever" in task_spec and not isinstance(task_spec["releasever"], (str, int)):
+            errors.append("[dnf] 'releasever' must be a string or integer (e.g. '9' or 9)")
 
         # Validate optional repos
         repos = task_spec.get("repos", [])
@@ -108,6 +116,7 @@ class DnfPlugin(OfflinePlugin):
 
             for repo in repos:
                 name = repo.get("name", "repo")
+                name = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
                 baseurl = repo.get("baseurl", "")
 
                 # Download GPG key into bundle for audit trail
@@ -118,6 +127,8 @@ class DnfPlugin(OfflinePlugin):
                         if not key_dest.exists() or ctx.no_cache:
                             if ctx.verbose:
                                 print(f"    [dnf] Downloading GPG key for '{name}'...")
+                            if not (gpgkey_url.startswith("http://") or gpgkey_url.startswith("https://")):
+                                raise ValueError(f"Invalid URL scheme (only http/https allowed): {gpgkey_url}")
                             urllib.request.urlretrieve(gpgkey_url, str(key_dest))
                     except Exception as exc:
                         errors.append(f"[dnf] Failed to download GPG key for repo '{name}': {exc}")
@@ -128,12 +139,36 @@ class DnfPlugin(OfflinePlugin):
                     print(f"    [dnf] Added repo '{name}' ({baseurl})")
 
         # ── Phase 1: Download packages ──────────────────────────────────────
-        dl_cmd = (
-            ["dnf", "download", "--resolve"]
-            + extra_repo_opts
-            + ["--destdir", str(cache_dir)]
-            + packages
-        )
+        #
+        # The correct approach for offline bundling is `dnf download --resolve`
+        # combined with `--installroot` pointing at a *minimal base OS root*.
+        #
+        # Why this is the right model:
+        #   - `dnf download --resolve`       → downloads ALL transitive deps,
+        #                                       regardless of any installed state.
+        #                                       Pulls in dbus, systemd, acl… even
+        #                                       though every fresh RHEL/Rocky node
+        #                                       already has them. Too much.
+        #   - `dnf install --downloadonly`   → only downloads what is missing on
+        #                                       the *build* machine. If the build
+        #                                       host has extra packages the fresh
+        #                                       target won't have, those are silently
+        #                                       skipped. Too little, wrong reference.
+        #   - `dnf download --resolve \
+        #       --installroot <minimal-root>` → DNF resolves as if it is installing
+        #                                       into that root. Packages already
+        #                                       present there (the minimal base OS:
+        #                                       systemd, dbus, acl…) are skipped.
+        #                                       Only your app's actual extra deps are
+        #                                       downloaded. Correct reference, correct
+        #                                       result regardless of the build host.
+        #
+        # Set `base_installroot` in your manifest task to the path of a minimal
+        # base-OS root (e.g. a debootstrapped/dnf-installrooted Rocky 9 tree).
+        # If omitted DNF falls back to resolving against the build host (old
+        # behaviour, can over- or under-download).
+        base_installroot = task_spec.get("base_installroot")
+        releasever = task_spec.get("releasever")
 
         if ctx.no_cache:
             if ctx.verbose:
@@ -145,15 +180,51 @@ class DnfPlugin(OfflinePlugin):
                     except OSError:
                         pass
 
+        # Snapshot what's already in cache before the download so we can
+        # copy only the RPMs that were actually fetched in this run.
+        pre_download_rpms = {f.name for f in cache_dir.iterdir() if f.is_file() and f.suffix == ".rpm"}
+
+        dl_cmd = ["dnf", "download", "--resolve", "--destdir", str(cache_dir)]
+
+        if base_installroot:
+            installroot_path = Path(base_installroot).expanduser().resolve()
+            if not installroot_path.is_dir():
+                errors.append(
+                    f"[dnf] base_installroot '{installroot_path}' does not exist or is not a directory. "
+                    "Create it first with: dnf install --installroot <path> @core -y"
+                )
+                return PluginResult(False, "Invalid base_installroot", artifacts, errors)
+            dl_cmd.extend(["--installroot", str(installroot_path)])
+            if ctx.verbose:
+                print(f"[dnf] Resolving deps against installroot: {installroot_path}")
+        else:
+            if ctx.verbose:
+                print(
+                    "[dnf] WARNING: no base_installroot set — resolving against build host. "
+                    "Set 'base_installroot' in your manifest to a minimal OS root for accurate dep resolution."
+                )
+
+        if releasever:
+            dl_cmd.extend(["--releasever", str(releasever)])
+
+        dl_cmd.extend(extra_repo_opts)
+        dl_cmd.extend(packages)
+
         res = subprocess.run(dl_cmd, capture_output=True, text=True)
         if res.returncode != 0:
             errors.append(f"[dnf] download failed: {res.stderr}")
             return PluginResult(False, "Failed to download RPMs", artifacts, errors)
 
-        # 2. Copy artifacts from cache to bundle
-        for f in cache_dir.iterdir():
-            if f.is_file() and f.suffix == ".rpm":
-                shutil.copy2(f, rpm_dir / f.name)
+        # 2. Copy only the RPMs that were downloaded in this run to the bundle.
+        #    (cache_dir may contain RPMs from previous pack runs — exclude those)
+        newly_downloaded = [
+            f for f in cache_dir.iterdir()
+            if f.is_file() and f.suffix == ".rpm" and f.name not in pre_download_rpms
+        ]
+        if ctx.verbose:
+            print(f"[dnf] Downloaded {len(newly_downloaded)} new RPM(s) to bundle.")
+        for f in newly_downloaded:
+            shutil.copy2(f, rpm_dir / f.name)
 
         res2 = subprocess.run(
             ["createrepo_c", str(rpm_dir)],

@@ -138,13 +138,14 @@ def run_apply(
             continue
 
         # Step A (cont.): SSH — extract archive and ensure state directory exists
+        import shlex
         remote_bundle = f"{host.bundle_dest.rstrip('/')}/{bundle_path.name}"
         bundle_extracted_dir = f"{host.bundle_dest.rstrip('/')}/extracted"
 
         extract_cmd = (
-            f"sudo rm -rf {bundle_extracted_dir} && "
-            f"sudo mkdir -p {bundle_extracted_dir} && "
-            f"sudo tar -xf {remote_bundle} -C {bundle_extracted_dir} --strip-components=1 && "
+            f"sudo rm -rf {shlex.quote(bundle_extracted_dir)} && "
+            f"sudo mkdir -p {shlex.quote(bundle_extracted_dir)} && "
+            f"sudo tar -xf {shlex.quote(remote_bundle)} -C {shlex.quote(bundle_extracted_dir)} --strip-components=1 && "
             f"sudo mkdir -p /opt/syncit/"
         )
 

@@ -121,6 +121,7 @@ class AptPlugin(OfflinePlugin):
 
             for repo in repos:
                 name = repo.get("name", "repo")
+                name = re.sub(r"[^a-zA-Z0-9._-]", "_", name)
                 repo_url = repo.get("url", "")
 
                 # Download GPG key into bundle for audit trail
@@ -131,6 +132,8 @@ class AptPlugin(OfflinePlugin):
                         try:
                             if ctx.verbose:
                                 rprint(f"    [dim]Downloading GPG key for '{name}'...[/dim]")
+                            if not (gpg_key_url.startswith("http://") or gpg_key_url.startswith("https://")):
+                                raise ValueError(f"Invalid URL scheme (only http/https allowed): {gpg_key_url}")
                             urllib.request.urlretrieve(gpg_key_url, str(key_dest))
                             # Check if ASCII-armored and dearmor if so
                             raw = key_dest.read_bytes()

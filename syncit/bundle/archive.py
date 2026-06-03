@@ -57,6 +57,16 @@ def extract_archive(archive_path: Path) -> Path:
 
     elif archive_path.name.lower().endswith(".zip"):
         with zipfile.ZipFile(archive_path, "r") as zf:
+            import os
+            def is_within_directory(directory, target):
+                abs_directory = os.path.abspath(directory)
+                abs_target = os.path.abspath(target)
+                prefix = os.path.commonprefix([abs_directory, abs_target])
+                return prefix == abs_directory
+            for member in zf.namelist():
+                member_path = os.path.join(str(tmp_dir), member)
+                if not is_within_directory(str(tmp_dir), member_path):
+                    raise Exception("Attempted Path Traversal in Zip File")
             zf.extractall(tmp_dir)
     else:
         shutil.rmtree(tmp_dir, ignore_errors=True)

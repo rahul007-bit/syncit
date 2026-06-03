@@ -78,7 +78,7 @@ pip install -e ".[dev]"
 | **apt**    | `apt-get`, `apt-cache`, `dpkg-scanpackages` (install: `sudo apt install dpkg-dev`) |
 | **dnf**    | `dnf`, `createrepo_c` (install: `sudo dnf install createrepo_c`) |
 | **pip**    | `pip3` or `pip`, `python3` |
-| **oci_image** | `skopeo` (install: `sudo apt install skopeo` or `sudo dnf install skopeo`) |
+| **oci_image** | `docker`, `podman`, or `skopeo` |
 | **npm**    | `node`, `npm` |
 | **cargo**  | `cargo` (Rust toolchain) |
 | **go**     | `go` (Go toolchain) |
@@ -659,11 +659,9 @@ bundle-ml-env-1.0.0/pip/
 
 ### 5.4 oci_image — Docker/OCI container images
 
-Pulls container images using `skopeo` and saves them as OCI archives for offline loading.
+Pulls container images using `docker`, `podman`, or `skopeo` and saves them as OCI or Docker archives for offline loading.
 
-**Pack phase:** Uses `skopeo copy docker://<source> oci:<cache>` to pull images to a local
-cache at `~/.cache/syncit/oci_image/`, then `skopeo copy oci:<cache> oci-archive:<archive>`
-to export as `.tar` files. Records image digests and metadata in `manifest.json`.
+**Pack phase:** Preferentially uses `docker pull` + `docker save`, then `podman`, then `skopeo`. Images are pulled to the local runtime cache or `~/.cache/syncit/oci_image/` (for skopeo), then bundled into individual `.tar` archives in the bundle. Records image digests and metadata in `manifest.json`.
 
 **Apply phase:** Detects the container runtime (`docker`, `podman`, or `ctr`) and loads
 images using the appropriate command. Skips images already present (checks by source tag).
@@ -742,7 +740,7 @@ bundle-container-env-1.0.0/images/
 
 #### Key details
 
-- Requires `skopeo` on the online machine (pack phase)
+- Requires `docker`, `podman`, or `skopeo` on the online machine (pack phase)
 - Requires `docker`, `podman`, or `ctr` on the offline VM (apply phase)
 - Supports private registries via skopeo's auth system
 - Only loads images not already present in the runtime (idempotent)

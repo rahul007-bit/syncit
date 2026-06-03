@@ -215,7 +215,7 @@ mypy syncit/ --ignore-missing-imports
 | `apt` | `apt-get`, `apt-cache`, `dpkg-scanpackages` | `apt-get` |
 | `dnf` | `dnf`, `createrepo_c`, `dnf-plugins-core` | `dnf`, `createrepo_c` |
 | `pip` | `pip3` | `pip3` |
-| `oci_image` | `skopeo` | `docker`/`podman`/`ctr` |
+| `oci_image` | `docker`/`podman`/`skopeo` | `docker`/`podman`/`ctr` |
 | `file` | None (Python urllib) | None |
 | `npm` | `node`, `npm` | None |
 | `cargo` | `cargo` | None |

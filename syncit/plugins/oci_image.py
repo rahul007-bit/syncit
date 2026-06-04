@@ -74,6 +74,27 @@ def _get_digest(source: str) -> str:
     return "sha256:unknown"
 
 
+def _normalize_ref(ref: str) -> str:
+    """Normalize docker image reference to include registry and tag."""
+    parts = ref.split("/")
+    
+    has_registry = False
+    if len(parts) > 1:
+        if "." in parts[0] or parts[0] == "localhost" or ":" in parts[0]:
+            has_registry = True
+            
+    if not has_registry:
+        if len(parts) == 1:
+            ref = f"docker.io/library/{ref}"
+        else:
+            ref = f"docker.io/{ref}"
+            
+    last_part = ref.split("/")[-1]
+    if ":" not in last_part:
+        ref = f"{ref}:latest"
+        
+    return ref
+
 class OciImagePlugin(OfflinePlugin):
     name = "oci_image"
 
@@ -86,6 +107,9 @@ class OciImagePlugin(OfflinePlugin):
         for i, img in enumerate(images):
             if not isinstance(img, dict) or "source" not in img:
                 errors.append(f"[oci_image] Image at index {i} must have a 'source' key")
+            else:
+                # Normalize early so all other methods see the fully qualified name
+                img["source"] = _normalize_ref(img["source"])
 
         # Check for skopeo, docker, or podman at validate time
         if not _has_cmd("skopeo") and not _has_cmd("podman") and not _has_cmd("docker"):
@@ -96,7 +120,7 @@ class OciImagePlugin(OfflinePlugin):
 
     def pack(self, task_spec: dict[str, Any], ctx: PackContext) -> PluginResult:
         images: list[dict[str, str]] = task_spec.get("images", [])
-        image_dir = ctx.bundle_dir / "images"
+        image_dir = ctx.bundle_dir / self.name / "images"
 
         if ctx.dry_run:
             sources = [img["source"] for img in images]
@@ -120,7 +144,7 @@ class OciImagePlugin(OfflinePlugin):
         errors: list[str] = []
 
         for img in images:
-            source = img["source"]
+            source = _normalize_ref(img["source"])
             safe = _safe_name(source)
             archive = image_dir / f"{safe}.tar"
 
@@ -139,8 +163,8 @@ class OciImagePlugin(OfflinePlugin):
                 shutil.rmtree(cache_path, ignore_errors=True)
 
             # 1. Pull and bundle
-            # Prefer docker, then podman, then skopeo based on user preference
-            pack_tool = "docker" if _has_cmd("docker") else "podman" if _has_cmd("podman") else "skopeo"
+            # Prefer skopeo, then podman, then docker based on archive format quality
+            pack_tool = "skopeo" if _has_cmd("skopeo") else "podman" if _has_cmd("podman") else "docker"
 
             if pack_tool == "skopeo":
                 if not cache_path.exists():
@@ -208,7 +232,7 @@ class OciImagePlugin(OfflinePlugin):
         )
 
     def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
-        image_dir = ctx.bundle_dir / "images"
+        image_dir = ctx.bundle_dir / self.name / "images"
         manifest_file = image_dir / "manifest.json"
 
         if not manifest_file.exists():
@@ -368,13 +392,13 @@ class OciImagePlugin(OfflinePlugin):
 
     def diff(self, old_spec: dict[str, Any] | None, new_spec: dict[str, Any]) -> DiffResult:
         if old_spec is None:
-            new_imgs = [img["source"] for img in new_spec.get("images", [])]
+            new_imgs = [_normalize_ref(img["source"]) for img in new_spec.get("images", [])]
             return DiffResult(
                 plugin_name=self.name, added=new_imgs, removed=[], updated=[], unchanged=[]
             )
 
-        old_map = {img["source"]: img for img in old_spec.get("images", [])}
-        new_map = {img["source"]: img for img in new_spec.get("images", [])}
+        old_map = {_normalize_ref(img["source"]): img for img in old_spec.get("images", [])}
+        new_map = {_normalize_ref(img["source"]): img for img in new_spec.get("images", [])}
 
         old_keys = set(old_map)
         new_keys = set(new_map)
@@ -399,7 +423,7 @@ class OciImagePlugin(OfflinePlugin):
 
         load_lines: list[str] = []
         for img in images:
-            source = img["source"]
+            source = _normalize_ref(img["source"])
             safe = _safe_name(source)
             tar = f"$BUNDLE_DIR/{bundle_subdir}/images/{safe}.tar"
             # skopeo path (preferred — correctly maps full reference into runtime store)

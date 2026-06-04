@@ -661,7 +661,7 @@ bundle-ml-env-1.0.0/pip/
 
 Pulls container images using `docker`, `podman`, or `skopeo` and saves them as OCI or Docker archives for offline loading.
 
-**Pack phase:** Preferentially uses `docker pull` + `docker save`, then `podman`, then `skopeo`. Images are pulled to the local runtime cache or `~/.cache/syncit/oci_image/` (for skopeo), then bundled into individual `.tar` archives in the bundle. Records image digests and metadata in `manifest.json`.
+**Pack phase:** Preferentially uses `skopeo`, then `podman`, then `docker`. Images are pulled to the local runtime cache or `~/.cache/syncit/oci_image/` (for skopeo), then bundled into individual `.tar` archives in the bundle. Records image digests and metadata in `manifest.json`.
 
 **Apply phase:** Detects the container runtime (`docker`, `podman`, or `ctr`) and loads
 images using the appropriate command. Skips images already present (checks by source tag).

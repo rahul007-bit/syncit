@@ -2,8 +2,8 @@ apiVersion: syncit/v1
 kind: Bundle
 metadata:
   name: k8s-offline-apt
-  version: "1.31.0"
-  description: "Kubernetes v1.31 bundle via apt (for Ubuntu/Debian targets)"
+  version: "1.35.5"
+  description: "Kubernetes v1.35.5 + CRI-O + Flannel + PostgreSQL 14 + Podman bundle (Ubuntu 24.04 / Noble)"
 
 spec:
   targets:
@@ -12,13 +12,60 @@ spec:
     arch: amd64
 
   tasks:
-    - name: Install Kubernetes packages via apt
+    # ─── 1. Kubernetes packages (kubeadm / kubelet / kubectl) ───────────────────
+    - name: Install Kubernetes packages
       plugin: apt
       repos:
         - name: kubernetes
-          url: "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /"
-          gpg_key: https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key
+          url: "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /"
+          gpg_key: "https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key"
       packages:
-        - kubelet
-        - kubeadm
-        - kubectl
+        - kubeadm=1.35.5-1.1
+        - kubelet=1.35.5-1.1
+        - kubectl=1.35.5-1.1
+
+    # ─── 2. CRI-O container runtime ─────────────────────────────────────────────
+    - name: Install CRI-O
+      plugin: apt
+      repos:
+        - name: crio
+          url: "deb [signed-by=/etc/apt/keyrings/crio.gpg] https://pkgs.k8s.io/addons:/cri-o:/stable:/v1.35/deb/ /"
+          gpg_key: "https://pkgs.k8s.io/addons:/cri-o:/stable:/v1.35/deb/Release.key"
+      packages:
+        - cri-o
+
+    # ─── 3. Podman (from Ubuntu universe — no extra repo needed) ────────────────
+    - name: Install Podman
+      plugin: apt
+      packages:
+        - podman
+
+    # ─── 4. PostgreSQL 14 ────────────────────────────────────────────────────────
+    - name: Install PostgreSQL 14
+      plugin: apt
+      repos:
+        - name: pgdg
+          url: "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main"
+          gpg_key: "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+      packages:
+        - postgresql-14
+        - postgresql-client-14
+
+    # ─── 5. Container images: Kubernetes control plane ──────────────────────────
+    - name: Pull Kubernetes control-plane images
+      plugin: oci_image
+      images:
+        - source: registry.k8s.io/kube-apiserver:v1.35.5
+        - source: registry.k8s.io/kube-controller-manager:v1.35.5
+        - source: registry.k8s.io/kube-scheduler:v1.35.5
+        - source: registry.k8s.io/kube-proxy:v1.35.5
+        - source: registry.k8s.io/etcd:3.6.6-0
+        - source: registry.k8s.io/coredns/coredns:v1.13.1
+        - source: registry.k8s.io/pause:3.10.1
+
+    # ─── 6. Container images: Flannel CNI ───────────────────────────────────────
+    - name: Pull Flannel CNI images
+      plugin: oci_image
+      images:
+        - source: ghcr.io/flannel-io/flannel:v0.28.3
+        - source: ghcr.io/flannel-io/flannel-cni-plugin:v1.9.1-flannel1

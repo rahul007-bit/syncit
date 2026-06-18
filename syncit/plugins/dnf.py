@@ -98,8 +98,9 @@ class DnfPlugin(OfflinePlugin):
         errors = []
         artifacts: list[str] = []
 
-        rpm_dir = ctx.bundle_dir / "dnf" / "rpms"
-        dnf_dir = ctx.bundle_dir / "dnf"
+        slug = ctx.task_slug or "default"
+        dnf_dir = ctx.bundle_dir / "dnf" / slug
+        rpm_dir = dnf_dir / "rpms"
         keys_dir = dnf_dir / "keys"
         rpm_dir.mkdir(parents=True, exist_ok=True)
 
@@ -258,7 +259,7 @@ class DnfPlugin(OfflinePlugin):
                 meta.append(entry)
             (dnf_dir / "repos.json").write_text(json.dumps(meta, indent=2))
 
-        artifacts.append("dnf/rpms")
+        artifacts.append(str(rpm_dir))
 
         return PluginResult(
             success=True,
@@ -275,12 +276,13 @@ class DnfPlugin(OfflinePlugin):
         errors = []
         artifacts: list[str] = []
 
-        bundled_rpms = ctx.bundle_dir / "dnf" / "rpms"
+        slug = ctx.task_slug or "default"
+        bundled_rpms = ctx.bundle_dir / "dnf" / slug / "rpms"
         if not bundled_rpms.exists():
             return PluginResult(False, "No bundled RPMs found", [], ["[dnf] rpms missing"])
 
-        dest_rpm = Path("/srv/offline/dnf/rpms")
-        repo_path = Path("/etc/yum.repos.d/offline.repo")
+        dest_rpm = Path("/srv/offline/dnf") / slug / "rpms"
+        repo_path = Path("/etc/yum.repos.d") / f"syncit-{slug}.repo"
 
         try:
             dest_rpm.mkdir(parents=True, exist_ok=True)
@@ -295,7 +297,13 @@ class DnfPlugin(OfflinePlugin):
             if res.returncode != 0:
                 raise Exception(f"createrepo_c failed: {res.stderr}")
 
-            repo_content = "[offline]\nname=Offline Bundle\nbaseurl=file:///srv/offline/dnf/rpms\nenabled=1\ngpgcheck=0\n"
+            repo_content = (
+                f"[syncit-{slug}]\n"
+                f"name=Syncit Offline Bundle ({slug})\n"
+                f"baseurl=file:///srv/offline/dnf/{slug}/rpms\n"
+                "enabled=1\n"
+                "gpgcheck=0\n"
+            )
             repo_path.parent.mkdir(parents=True, exist_ok=True)
             repo_path.write_text(repo_content)
             artifacts.append(str(repo_path))
@@ -354,15 +362,17 @@ class DnfPlugin(OfflinePlugin):
 
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         packages = " ".join(task_spec.get("packages", []))
+        # bundle_subdir is e.g. "dnf/install-kubernetes-packages"
+        slug = bundle_subdir.split("/", 1)[-1] if "/" in bundle_subdir else bundle_subdir
         return f"""
-echo "[dnf] Configuring local repository..."
-mkdir -p /srv/offline/dnf/rpms
-cp -r $BUNDLE_DIR/{bundle_subdir}/rpms/* /srv/offline/dnf/rpms/
-createrepo_c /srv/offline/dnf/rpms
-cat > /etc/yum.repos.d/syncit.repo << 'EOF'
-[syncit]
-name=Syncit Local Repo
-baseurl=file:///srv/offline/dnf/rpms
+echo "[dnf] Configuring local repository ({bundle_subdir})..."
+mkdir -p /srv/offline/dnf/{slug}/rpms
+cp -r "$BUNDLE_DIR/{bundle_subdir}/rpms/"* /srv/offline/dnf/{slug}/rpms/
+createrepo_c /srv/offline/dnf/{slug}/rpms
+cat > /etc/yum.repos.d/syncit-{slug}.repo << 'EOF'
+[syncit-{slug}]
+name=Syncit Local Repo ({slug})
+baseurl=file:///srv/offline/dnf/{slug}/rpms
 enabled=1
 gpgcheck=0
 EOF

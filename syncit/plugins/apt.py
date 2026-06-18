@@ -217,15 +217,26 @@ class AptPlugin(OfflinePlugin):
                 all_pkgs.add(pkg)
                 for line in dep_res.stdout.splitlines():
                     line = line.strip()
+                    
+                    # Keep alternative dependencies (e.g. '|Depends: pinentry-curses')
+                    if line.startswith("|"):
+                        line = line[1:].strip()
+                        
+                    # Only process explicit dependency declarations
+                    if not (line.startswith("Depends:") or line.startswith("PreDepends:")):
+                        continue
+                        
+                    line = line.removeprefix("Depends:").removeprefix("PreDepends:").strip()
+                    
                     if ">" in line or "<" in line:
                         continue
-                    if line.startswith("|"):
-                        continue
+                        
                     if ":any" in line or ":native" in line:
-                        continue
-                    line = line.removeprefix("Depends:").removeprefix("PreDepends:").strip()
+                        line = line.replace(":any", "").replace(":native", "")
+                        
                     if not line:
                         continue
+                        
                     name = line.split()[0]
                     if re.match(r"^[a-z0-9][a-z0-9.+\-]+$", name):
                         all_pkgs.add(name)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -32,6 +33,13 @@ console = Console()
 err_console = Console(stderr=True)
 
 from syncit import __version__ as SYNCIT_VERSION
+
+
+def _task_slug(name: str) -> str:
+    """Convert a task name to a safe directory slug, e.g. 'Install CRI-O' → 'install-cri-o'."""
+    slug = name.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    return slug.strip("-")
 
 
 def run_pack(
@@ -106,6 +114,7 @@ def run_pack(
         ctx = PackContext(
             bundle_dir=bundle_dir,
             manifest_dir=manifest_dir,
+            task_slug=_task_slug(task.name),
             dry_run=dry_run,
             verbose=verbose,
             no_cache=no_cache,

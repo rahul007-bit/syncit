@@ -92,7 +92,8 @@ class AptPlugin(OfflinePlugin):
     def pack(self, task_spec: dict[str, Any], ctx: PackContext) -> PluginResult:
         packages: list[str] = task_spec.get("packages", [])
         repos: list[dict[str, Any]] = task_spec.get("repos", [])
-        apt_dir = ctx.bundle_dir / "apt"
+        slug = ctx.task_slug or "default"
+        apt_dir = ctx.bundle_dir / "apt" / slug
         deb_dir = apt_dir / "debs"
         keys_dir = apt_dir / "keys"
         deb_dir.mkdir(parents=True, exist_ok=True)
@@ -371,7 +372,8 @@ class AptPlugin(OfflinePlugin):
                 shutil.rmtree(temp_sources, ignore_errors=True)
 
     def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
-        bundle_apt = ctx.bundle_dir / "apt"
+        slug = ctx.task_slug or "default"
+        bundle_apt = ctx.bundle_dir / "apt" / slug
         deb_dir = bundle_apt / "debs"
         packages_file = bundle_apt / "Packages"
 
@@ -398,7 +400,7 @@ class AptPlugin(OfflinePlugin):
                 )
 
         packages: list[str] = task_spec.get("packages", [])
-        target_dir = Path("/srv/offline/apt")
+        target_dir = Path("/srv/offline/apt") / slug
 
         if ctx.dry_run:
             return PluginResult(
@@ -506,7 +508,7 @@ class AptPlugin(OfflinePlugin):
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         packages = " ".join(task_spec.get("packages", []))
         return f"""
-echo "[apt] Configuring isolated local repository..."
+echo "[apt] Configuring isolated local repository ({bundle_subdir})..."
 SOURCES_FILE="$BUNDLE_DIR/{bundle_subdir}/syncit.list"
 echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir}/debs ./" > "$SOURCES_FILE"
 

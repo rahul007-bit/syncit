@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,13 @@ from rich.console import Console
 
 console = Console()
 err_console = Console(stderr=True)
+
+
+def _task_slug(name: str) -> str:
+    """Convert a task name to a safe directory slug."""
+    slug = name.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    return slug.strip("-")
 
 
 def build_ssh_cmd(host) -> list[str]:
@@ -103,7 +111,8 @@ def run_apply(
         for task in tasks:
             plugin = registry.get(task.plugin)
             if hasattr(plugin, "render_apply_sh"):
-                snippet = plugin.render_apply_sh(task.config, task.plugin)
+                bundle_subdir = f"{task.plugin}/{_task_slug(task.name)}"
+                snippet = plugin.render_apply_sh(task.config, bundle_subdir)
                 if snippet:
                     script_lines.append(snippet)
             else:
@@ -190,7 +199,8 @@ def run_apply(
                     continue
 
                 # Step D: Stream the task execution via bash -s
-                snippet = plugin.render_apply_sh(task.config, task.plugin)
+                bundle_subdir = f"{task.plugin}/{_task_slug(task.name)}"
+                snippet = plugin.render_apply_sh(task.config, bundle_subdir)
                 full_script = (
                     f"#!/usr/bin/env bash\n"
                     f"set -euo pipefail\n"

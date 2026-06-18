@@ -8,6 +8,7 @@ from typing import Any
 class PackContext:
     bundle_dir: Path  # Root of the bundle being built
     manifest_dir: Path  # Directory containing bundle.yaml (for relative paths)
+    task_slug: str = ""   # URL-safe slug derived from task.name (e.g. "install-kubernetes-packages")
     dry_run: bool = False
     verbose: bool = False
     no_cache: bool = False
@@ -17,6 +18,7 @@ class PackContext:
 class ApplyContext:
     bundle_dir: Path  # Root of the bundle to apply
     state_file: Path  # Path to state.json on offline VM
+    task_slug: str = ""   # URL-safe slug derived from task.name (e.g. "install-kubernetes-packages")
     dry_run: bool = False
     verbose: bool = False
     force: bool = False  # Re-apply even if state says already done
@@ -82,6 +84,7 @@ class OfflinePlugin(ABC):
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         """
         Generate a bash strictly relying on native OS dependencies for zero-dependency remote apply.
-        `bundle_subdir` is the sub-directory name for this plugin within `$BUNDLE_DIR` (e.g. "apt", "pip").
+        `bundle_subdir` is the sub-directory path for this task within `$BUNDLE_DIR`
+        (e.g. "apt/install-kubernetes-packages").
         """
         pass

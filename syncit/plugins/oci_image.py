@@ -120,7 +120,8 @@ class OciImagePlugin(OfflinePlugin):
 
     def pack(self, task_spec: dict[str, Any], ctx: PackContext) -> PluginResult:
         images: list[dict[str, str]] = task_spec.get("images", [])
-        image_dir = ctx.bundle_dir / self.name / "images"
+        slug = ctx.task_slug or "default"
+        image_dir = ctx.bundle_dir / self.name / slug / "images"
 
         if ctx.dry_run:
             sources = [img["source"] for img in images]
@@ -232,7 +233,8 @@ class OciImagePlugin(OfflinePlugin):
         )
 
     def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
-        image_dir = ctx.bundle_dir / self.name / "images"
+        slug = ctx.task_slug or "default"
+        image_dir = ctx.bundle_dir / self.name / slug / "images"
         manifest_file = image_dir / "manifest.json"
 
         if not manifest_file.exists():

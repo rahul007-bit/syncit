@@ -112,6 +112,21 @@ def run_pack(
         )
 
         try:
+            # 1. Validate the task config first
+            validation_errors = plugin.validate(task.config)
+            if validation_errors:
+                err_console.print(f"  [bold red]✗ VALIDATION FAILED:[/] {task.name}")
+                for err in validation_errors:
+                    err_console.print(f"    [red]{err}[/]")
+                overall_ok = False
+                task_metas.append(
+                    BundleTaskMeta(
+                        name=task.name, plugin=plugin_name, status="failed", artifact_count=0
+                    )
+                )
+                continue
+
+            # 2. Pack the task
             result = plugin.pack(task.config, ctx)
         except NotImplementedError as exc:
             err_console.print(f"  [red]✗ SKIP:[/] {exc}")

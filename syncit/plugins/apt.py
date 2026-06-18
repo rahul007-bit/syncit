@@ -61,6 +61,10 @@ class AptPlugin(OfflinePlugin):
             if not isinstance(pkg, str) or not pkg.strip():
                 errors.append(f"[apt] Invalid package entry: {pkg!r}")
 
+        if "base_installroot" in task_spec:
+            if not isinstance(task_spec["base_installroot"], str):
+                errors.append("[apt] 'base_installroot' must be a string path")
+
         # Validate optional repos
         repos = task_spec.get("repos", [])
         if repos:
@@ -189,114 +193,79 @@ class AptPlugin(OfflinePlugin):
                 )
 
         try:
-            # ── Phase 1: Resolve recursive dependencies for each package ──
+            # ── Phase 1: Resolve dependencies for each package ──
             if ctx.verbose:
                 from rich import print as rprint
 
                 rprint(f"[cyan]→[/] Resolving dependencies for: {' '.join(packages)}...")
 
-            for pkg in packages:
-                dep_cmd = [
-                    "apt-cache",
-                    "depends",
-                    "--recurse",
-                    "--no-recommends",
-                    "--no-suggests",
-                    "--no-conflicts",
-                    "--no-breaks",
-                    "--no-replaces",
-                    "--no-enhances",
-                    pkg,
-                ] + extra_opts
-                dep_res = _run(dep_cmd)
-                if dep_res.returncode != 0:
+            base_installroot = task_spec.get("base_installroot")
+
+            # Use APT's native solver to find exactly what needs to be downloaded
+            install_cmd = [
+                "apt-get",
+                "install",
+                "--print-uris",
+                "-qq",
+                "--no-install-recommends",
+                "-y",
+            ] + extra_opts
+
+            if base_installroot:
+                installroot_path = Path(base_installroot).expanduser().resolve()
+                if not installroot_path.is_dir():
                     errors.append(
-                        f"[apt] apt-cache depends failed for '{pkg}': {dep_res.stderr.strip()}"
+                        f"[apt] base_installroot '{installroot_path}' does not exist or is not a directory."
                     )
+                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=artifacts, errors=errors)
+
+                status_file = installroot_path / "var" / "lib" / "dpkg" / "status"
+                if not status_file.exists():
+                    errors.append(
+                        f"[apt] base_installroot missing status file at {status_file}. "
+                        "Ensure this is a valid Ubuntu/Debian root."
+                    )
+                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=artifacts, errors=errors)
+
+                install_cmd.extend(["-o", f"Dir::State::status={status_file}"])
+                if ctx.verbose:
+                    rprint(f"[apt] Resolving deps against installroot: {installroot_path}")
+            else:
+                if ctx.verbose:
+                    rprint(
+                        "[apt] WARNING: no base_installroot set — resolving against build host's dpkg status. "
+                        "Set 'base_installroot' in your manifest to a minimal OS root for accurate dep resolution."
+                    )
+
+            install_cmd.extend(packages)
+
+            res = _run(install_cmd)
+            if res.returncode != 0:
+                errors.append(f"[apt] apt-get install failed to resolve packages: {res.stderr.strip()}")
+                return PluginResult(success=False, message="Dependency resolution failed", artifacts=artifacts, errors=errors)
+
+            # Output lines look like:
+            # 'http://archive.ubuntu.com/.../podman_4.9.3_amd64.deb' podman_4.9.3_amd64.deb 13408626 MD5Sum:...
+            all_pkgs: set[str] = set()
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if not line or not line.startswith("'"):
                     continue
+                parts = line.split()
+                if len(parts) >= 2:
+                    filename = parts[1]
+                    # package name is everything before the first underscore
+                    pkg_name = filename.split("_", 1)[0]
+                    all_pkgs.add(pkg_name)
 
-                all_pkgs.add(pkg)
-                for line in dep_res.stdout.splitlines():
-                    line = line.strip()
-                    
-                    # Keep alternative dependencies (e.g. '|Depends: pinentry-curses')
-                    if line.startswith("|"):
-                        line = line[1:].strip()
-                        
-                    # Only process explicit dependency declarations
-                    if not (line.startswith("Depends:") or line.startswith("PreDepends:")):
-                        continue
-                        
-                    line = line.removeprefix("Depends:").removeprefix("PreDepends:").strip()
-                    
-                    if ">" in line or "<" in line:
-                        continue
-                        
-                    if ":any" in line or ":native" in line:
-                        line = line.replace(":any", "").replace(":native", "")
-                        
-                    if not line:
-                        continue
-                        
-                    name = line.split()[0]
-                    if re.match(r"^[a-z0-9][a-z0-9.+\-]+$", name):
-                        all_pkgs.add(name)
+            # Always ensure explicitly requested packages are included in the download list
+            for p in packages:
+                all_pkgs.add(p.split("=")[0].split("/")[0].split(":")[0])
 
-            if not all_pkgs and errors:
-                return PluginResult(
-                    success=False,
-                    message="Dependency resolution failed",
-                    artifacts=[],
-                    errors=errors,
-                )
-
-            # ── Phase 1b: Filter out base-system packages ─────────────────
-            # Packages with Priority: required/important or Essential: yes are
-            # guaranteed to be present on any Ubuntu installation. Bundling them
-            # wastes space and can cause conflicts when apt tries to reinstall them.
-            # We always keep packages explicitly requested by the user.
-            explicit_pkgs = {p.split("=")[0].split("/")[0] for p in packages}
-            skipped_base: list[str] = []
-            if ctx.verbose:
-                rprint("[cyan]→[/] Filtering base-system packages (required/important/essential)...")
-
-            filtered_pkgs: set[str] = set()
-            for pkg in all_pkgs:
-                if pkg in explicit_pkgs:
-                    # Always keep explicitly requested packages
-                    filtered_pkgs.add(pkg)
-                    continue
-                info = _run(["apt-cache", "show", pkg] + extra_opts)
-                if info.returncode != 0:
-                    filtered_pkgs.add(pkg)
-                    continue
-                priority = ""
-                essential = ""
-                for ln in info.stdout.splitlines():
-                    if ln.startswith("Priority: "):
-                        priority = ln.split(": ", 1)[1].strip().lower()
-                    if ln.startswith("Essential: "):
-                        essential = ln.split(": ", 1)[1].strip().lower()
-                    if priority and essential:
-                        break
-                if priority in ("required", "important") or essential == "yes":
-                    skipped_base.append(pkg)
-                else:
-                    filtered_pkgs.add(pkg)
-
-            if ctx.verbose and skipped_base:
-                rprint(
-                    f"    [dim]Skipped {len(skipped_base)} base-system package(s) "
-                    f"(already on every Ubuntu install): {', '.join(sorted(skipped_base)[:8])}"
-                    + (" ..." if len(skipped_base) > 8 else "") + "[/dim]"
-                )
-
-            all_pkgs = filtered_pkgs
             sorted_pkgs = sorted(list(all_pkgs))
             total_dl = len(sorted_pkgs)
             if ctx.verbose:
-                rprint(f"[cyan]→[/] Resolved {total_dl} packages (after base-system filter)")
-
+                rprint(f"[cyan]→[/] Resolved {total_dl} packages to download")
 
             # ── Phase 2: Download all resolved packages with caching ──────
             cache_dir = Path("~/.cache/syncit/apt").expanduser()
@@ -306,48 +275,32 @@ class AptPlugin(OfflinePlugin):
                 if ctx.verbose:
                     rprint(f"[cyan]→[/] Processing: {p} ({i}/{total_dl})...")
 
-                pkg_info = _run(["apt-cache", "show", p] + extra_opts)
-                if pkg_info.returncode != 0:
-                    errors.append(f"[apt] apt-cache show failed for '{p}'")
-                    continue
-
-                ver, arch = "", ""
-                for line in pkg_info.stdout.splitlines():
-                    if line.startswith("Version: "):
-                        ver = line.split(": ", 1)[1]
-                    if line.startswith("Architecture: "):
-                        arch = line.split(": ", 1)[1]
-                    if ver and arch:
-                        break
-
-                p_name = p.split("=")[0].split("/")[0]
-                deb_filename = f"{p_name}_{ver.replace(':', '%3a')}_{arch}.deb"
-                cache_path = cache_dir / deb_filename
-
-                if not ctx.no_cache and cache_path.exists():
+                cand = list(cache_dir.glob(f"{p}_*.deb"))
+                if not ctx.no_cache and cand:
+                    latest = max(cand, key=lambda x: x.stat().st_mtime)
                     if ctx.verbose:
-                        rprint(f"    [dim]Using cached: {deb_filename}[/dim]")
+                        rprint(f"    [dim]Using cached: {latest.name}[/dim]")
                 else:
                     if ctx.verbose:
                         action = "Forced re-download" if ctx.no_cache else "Downloading"
                         rprint(f"    [dim]{action}: {p}...[/dim]")
+                    
+                    # Clean up old cached versions of this specific package
+                    for old_f in cache_dir.glob(f"{p}_*.deb"):
+                        old_f.unlink(missing_ok=True)
+
                     dl_res = _run(["apt-get", "download", p] + extra_opts, cwd=str(cache_dir))
                     if dl_res.returncode != 0:
-                        errors.append(
-                            f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}"
-                        )
+                        errors.append(f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}")
                         continue
 
                 # Copy from cache to bundle debs dir
-                if cache_path.exists():
-                    shutil.copy2(str(cache_path), str(deb_dir / deb_filename))
+                cand_after = list(cache_dir.glob(f"{p}_*.deb"))
+                if cand_after:
+                    latest_after = max(cand_after, key=lambda x: x.stat().st_mtime)
+                    shutil.copy2(str(latest_after), str(deb_dir / latest_after.name))
                 else:
-                    cand = list(cache_dir.glob(f"{p_name}_*.deb"))
-                    if cand:
-                        latest = max(cand, key=lambda x: x.stat().st_mtime)
-                        shutil.copy2(str(latest), str(deb_dir / latest.name))
-                    else:
-                        errors.append(f"[apt] Could not find downloaded .deb for '{p}' in cache")
+                    errors.append(f"[apt] Could not find downloaded .deb for '{p}' in cache")
 
             # ── Phase 3: Generate Packages index ──────────────────────────
             if ctx.verbose:

@@ -287,7 +287,6 @@ class AptPlugin(OfflinePlugin):
                 rprint(f"[cyan]→[/] Resolved {total_dl} packages to download")
 
             # ── Phase 2: Download all resolved packages with caching ──────
-            import tempfile
             cache_dir = Path("~/.cache/syncit/apt").expanduser()
             cache_dir.mkdir(parents=True, exist_ok=True)
 

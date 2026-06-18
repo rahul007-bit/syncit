@@ -265,7 +265,8 @@ class AptPlugin(OfflinePlugin):
                     if ver and arch:
                         break
 
-                deb_filename = f"{p}_{ver.replace(':', '%3a')}_{arch}.deb"
+                p_name = p.split("=")[0].split("/")[0]
+                deb_filename = f"{p_name}_{ver.replace(':', '%3a')}_{arch}.deb"
                 cache_path = cache_dir / deb_filename
 
                 if not ctx.no_cache and cache_path.exists():
@@ -286,7 +287,7 @@ class AptPlugin(OfflinePlugin):
                 if cache_path.exists():
                     shutil.copy2(str(cache_path), str(deb_dir / deb_filename))
                 else:
-                    cand = list(cache_dir.glob(f"{p}_*.deb"))
+                    cand = list(cache_dir.glob(f"{p_name}_*.deb"))
                     if cand:
                         latest = max(cand, key=lambda x: x.stat().st_mtime)
                         shutil.copy2(str(latest), str(deb_dir / latest.name))

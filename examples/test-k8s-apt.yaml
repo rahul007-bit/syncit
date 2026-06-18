@@ -29,8 +29,8 @@ spec:
       plugin: apt
       repos:
         - name: crio
-          url: "deb [signed-by=/etc/apt/keyrings/crio.gpg] https://pkgs.k8s.io/addons:/cri-o:/stable:/v1.35/deb/ /"
-          gpg_key: "https://pkgs.k8s.io/addons:/cri-o:/stable:/v1.35/deb/Release.key"
+          url: "deb [signed-by=/etc/apt/keyrings/crio.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v1.35/deb/ /"
+          gpg_key: "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v1.35/deb/Release.key"
       packages:
         - cri-o
 

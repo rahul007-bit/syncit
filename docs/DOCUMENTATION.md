@@ -481,15 +481,28 @@ bundle-dev-tools-1.0.0/apt/
 Downloads RPM packages with dependency resolution and creates a local yum/dnf repository.
 
 **Pack phase:** Downloads all requested RPMs with `dnf download --resolve` to a cache at
-`~/.cache/syncit/dnf/`, then runs `createrepo_c` to generate repository metadata.
+`~/.cache/syncit/dnf/`, then runs `createrepo_c` to generate repository metadata. Each task
+gets its own isolated subfolder under `dnf/<task-slug>/` so multiple dnf tasks never mix RPMs.
 
 > **Note:** syncit supports adding upstream repos automatically during `pack`
 > via the `repos` field (see below). No manual repo setup needed on the online machine.
 
-**Apply phase:** Copies RPMs to `/srv/offline/dnf/rpms/`, writes a `.repo` file at
-`/etc/yum.repos.d/offline.repo`, and installs packages from the local repo.
+**Apply phase:** Copies RPMs to `/srv/offline/dnf/<task-slug>/rpms/`, writes a per-task
+`.repo` file at `/etc/yum.repos.d/syncit-<task-slug>.repo`, and installs packages from
+the local repo.
 
 #### Manifest Task Spec
+
+| Field                  | Required | Description                                                        |
+|------------------------|----------|--------------------------------------------------------------------|
+| `packages`             | Yes      | List of RPM package names to install                               |
+| `repos`                | No       | List of upstream repository definitions (see below)                |
+| `repos[].name`         | Yes      | Unique short name for the repo                                     |
+| `repos[].baseurl`      | Yes      | Base URL of the repository                                         |
+| `repos[].gpgcheck`     | No       | GPG check setting (`"1"` or `"0"`, default off)                    |
+| `repos[].gpgkey`       | No       | URL to the GPG key file                                            |
+| `base_installroot`     | No       | Path to a minimal OS root for accurate dep resolution (see below)  |
+| `releasever`           | No       | Override the OS release version (e.g. `"9"` for Rocky 9)          |
 
 ```yaml
 - name: Install system RPMs
@@ -508,64 +521,174 @@ Optionally, declare upstream repositories for third-party packages:
   plugin: dnf
   repos:
     - name: kubernetes
-      baseurl: https://pkgs.k8s.io/core:/stable:/v1.31/rpm/
+      baseurl: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/
       gpgcheck: "1"
-      gpgkey: https://pkgs.k8s.io/core:/stable:/v1.31/rpm/repodata/repomd.xml.key
+      gpgkey: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/repodata/repomd.xml.key
   packages:
     - kubeadm
     - kubelet
     - kubectl
 ```
 
-| Field                  | Required | Description                                      |
-|------------------------|----------|--------------------------------------------------|
-| `repos`                | No       | List of upstream repository definitions          |
-| `repos[].name`         | Yes      | Unique short name for the repo                   |
-| `repos[].baseurl`      | Yes      | Base URL of the repository (e.g., `https://pkgs.k8s.io/.../rpm/`) |
-| `repos[].gpgcheck`     | No       | GPG check setting (`"1"` or `"0"`, default off)  |
-| `repos[].gpgkey`       | No       | URL to the GPG key file (downloaded and stored in bundle for audit) |
-
 During `pack`, repos are injected via `--repofrompath=<name>,<baseurl>` — no system files
-are modified. GPG keys are stored in the bundle (`dnf/keys/`). The offline `apply` phase
-uses the local `file://` repo only.
+are modified. GPG keys are stored in the bundle (`dnf/<slug>/keys/`) for audit and diff.
+The offline `apply` phase uses the local `file://` repo only.
 
-#### Example
+---
+
+#### `base_installroot` — Accurate Dependency Resolution
+
+By default, `dnf download --resolve` resolves dependencies against the **build host's** installed
+package set. This means:
+
+- If the build host has `systemd`, `dbus`, `glibc`, etc. already installed, DNF skips them
+  — even though the fresh target VM might need a slightly different version.
+- If the build host has *extra* packages not on a minimal target, those are silently omitted.
+
+The result can be an **over- or under-bundled** package set depending on how closely the build
+host matches the target.
+
+**The fix:** point `base_installroot` to a minimal base OS root that mirrors a freshly-installed
+target node. DNF then resolves as if installing into that clean environment, producing a bundle
+that contains exactly the right deps for the target.
+
+##### How to create a minimal installroot
+
+```bash
+# On your online RHEL/Rocky/Alma build host:
+# 1. Create a minimal Rocky 9 installroot (only takes a few seconds)
+mkdir -p /opt/syncit-roots/rocky9-minimal
+sudo dnf install -y \
+  --installroot /opt/syncit-roots/rocky9-minimal \
+  --releasever 9 \
+  @core --setopt=install_weak_deps=False
+
+# 2. Reference it in your manifest
+```
+
+```yaml
+- name: Install Kubernetes
+  plugin: dnf
+  base_installroot: /opt/syncit-roots/rocky9-minimal
+  releasever: "9"
+  repos:
+    - name: kubernetes
+      baseurl: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/
+      gpgkey: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/repodata/repomd.xml.key
+  packages:
+    - kubeadm
+    - kubelet
+    - kubectl
+```
+
+With `base_installroot` set, `dnf download --resolve --installroot <path>` will:
+- Treat the minimal root as the reference state
+- Skip packages already in that root (`glibc`, `systemd`, `bash`, etc.)
+- Only download your app's *actual* extra dependencies
+
+> [!IMPORTANT]
+> The `base_installroot` must be an **absolute path** to an existing directory on the
+> packing machine. It is never transferred to the bundle — it is only used during `pack`
+> for dep resolution. Create and maintain it separately on your build host.
+
+> [!TIP]
+> Reuse the same installroot across multiple pack runs for the same distro version.
+> It only needs to be re-created when the target OS version changes.
+> You can add it to a `Makefile` or CI script to keep it fresh:
+> ```bash
+> make installroot  # recreates /opt/syncit-roots/rocky9-minimal
+> syncit pack bundle.yaml --output ./bundles/
+> ```
+
+##### `releasever` field
+
+The `releasever` field overrides the OS release version used by DNF when resolving packages.
+Useful when the build host runs a different major version than the target:
+
+```yaml
+  releasever: "9"    # Force Rocky/RHEL 9 resolution even on an EL8 build host
+```
+
+---
+
+#### Full Example (Kubernetes on Rocky 9)
 
 ```yaml
 apiVersion: syncit/v1
 kind: Bundle
 metadata:
-  name: rpm-env
-  version: "1.0.0"
+  name: k8s-rocky9
+  version: "1.35.5"
+  description: "Kubernetes v1.35.5 + CRI-O for Rocky Linux 9 (offline)"
 spec:
   targets:
-    distro: rhel
+    distro: rocky
     codename: "9"
     arch: amd64
   tasks:
-    - name: Essential RPMs
+    - name: Install Kubernetes packages
       plugin: dnf
-      packages: [git, curl, wget, nginx, python3, python3-pip, tmux]
+      base_installroot: /opt/syncit-roots/rocky9-minimal
+      releasever: "9"
+      repos:
+        - name: kubernetes
+          baseurl: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/
+          gpgcheck: "1"
+          gpgkey: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/repodata/repomd.xml.key
+      packages:
+        - kubeadm
+        - kubelet
+        - kubectl
+
+    - name: Install CRI-O
+      plugin: dnf
+      base_installroot: /opt/syncit-roots/rocky9-minimal
+      releasever: "9"
+      repos:
+        - name: crio
+          baseurl: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v1.35/rpm/
+          gpgcheck: "0"
+      packages:
+        - cri-o
 ```
 
 ```bash
-syncit validate bundle.yaml
-syncit pack bundle.yaml --output ./bundles/
-# Transfer bundle to offline RHEL/Rocky/Alma VM...
-syncit apply ./bundles/bundle-rpm-env-1.0.0/
+# One-time: create minimal installroot on build host
+sudo dnf install -y --installroot /opt/syncit-roots/rocky9-minimal \
+  --releasever 9 @core --setopt=install_weak_deps=False
+
+# Pack
+syncit pack bundle.yaml --output ./bundles/ --verbose
+
+# Transfer bundle to offline Rocky 9 node and apply
+syncit apply ./bundles/bundle-k8s-rocky9-1.35.5/
 ```
 
-#### Bundle layout
+#### Bundle layout (per-task isolation)
 
 ```
-bundle-rpm-env-1.0.0/dnf/
-└── rpms/
-    ├── git-2.39.3-1.el9.x86_64.rpm
-    ├── nginx-1.24.0-1.el9.x86_64.rpm
-    ├── python3-3.9.18-1.el9.x86_64.rpm
-    ├── ... (transitive deps)
-    └── repodata/           # createrepo_c metadata
+bundle-k8s-rocky9-1.35.5/dnf/
+├── install-kubernetes-packages/
+│   ├── rpms/
+│   │   ├── kubeadm-1.35.5-1.x86_64.rpm
+│   │   ├── kubelet-1.35.5-1.x86_64.rpm
+│   │   ├── kubectl-1.35.5-1.x86_64.rpm
+│   │   ├── kubernetes-cni-1.x86_64.rpm
+│   │   └── repodata/          # createrepo_c metadata
+│   ├── keys/                  # (optional) Downloaded GPG keys
+│   └── repos.json             # Repo metadata for diff/audit
+└── install-cri-o/
+    └── rpms/
+        ├── cri-o-1.35.4-1.x86_64.rpm
+        ├── conmon-2.1.x86_64.rpm
+        ├── ... (cri-o specific transitive deps)
+        └── repodata/
 ```
+
+Each dnf task gets its own:
+- Isolated RPM directory (`dnf/<slug>/rpms/`)
+- Independent `.repo` file on the target (`/etc/yum.repos.d/syncit-<slug>.repo`)
+- Separate install destination (`/srv/offline/dnf/<slug>/rpms/`)
 
 ---
 

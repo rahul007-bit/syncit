@@ -2,8 +2,8 @@ apiVersion: syncit/v1
 kind: Bundle
 metadata:
   name: k8s-offline-dnf
-  version: "1.31.0"
-  description: "Kubernetes v1.31 bundle via dnf (for RHEL/Rocky/CentOS targets)"
+  version: "1.35.5"
+  description: "Kubernetes v1.35.5 + CRI-O bundle via dnf (for RHEL/Rocky 9 targets)"
 
 spec:
   targets:
@@ -12,14 +12,41 @@ spec:
     arch: amd64
 
   tasks:
-    - name: Install Kubernetes packages via DNF
+    # ─── 1. Kubernetes packages (kubeadm / kubelet / kubectl) ────────────────────
+    #
+    # base_installroot: path to a minimal Rocky 9 root on the BUILD HOST.
+    # This tells DNF to resolve deps as if installing into a freshly-installed
+    # Rocky 9 node (skipping glibc, systemd, etc. which are always present).
+    #
+    # Create it once on your build host:
+    #   sudo dnf install -y --installroot /opt/syncit-roots/rocky9-minimal \
+    #     --releasever 9 @core --setopt=install_weak_deps=False
+    #
+    # If you omit base_installroot, DNF falls back to the build host's installed
+    # state — which may over- or under-bundle depending on how closely it
+    # matches the target. A warning will be printed during pack.
+    - name: Install Kubernetes packages
       plugin: dnf
+      base_installroot: /opt/syncit-roots/rocky9-minimal  # see comment above
+      releasever: "9"
       repos:
         - name: kubernetes
-          baseurl: https://pkgs.k8s.io/core:/stable:/v1.31/rpm/
-          gpgcheck: yes
-          gpgkey: https://pkgs.k8s.io/core:/stable:/v1.31/rpm/repodata/repomd.xml.key
+          baseurl: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/
+          gpgcheck: "1"
+          gpgkey: https://pkgs.k8s.io/core:/stable:/v1.35/rpm/repodata/repomd.xml.key
       packages:
-        - kubelet.x86_64
-        - kubeadm.x86_64
-        - kubectl.x86_64
+        - kubeadm
+        - kubelet
+        - kubectl
+
+    # ─── 2. CRI-O container runtime ─────────────────────────────────────────────
+    - name: Install CRI-O
+      plugin: dnf
+      base_installroot: /opt/syncit-roots/rocky9-minimal
+      releasever: "9"
+      repos:
+        - name: crio
+          baseurl: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v1.35/rpm/
+          gpgcheck: "0"
+      packages:
+        - cri-o

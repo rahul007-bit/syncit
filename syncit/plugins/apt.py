@@ -217,7 +217,7 @@ class AptPlugin(OfflinePlugin):
                     errors.append(
                         f"[apt] base_installroot '{installroot_path}' does not exist or is not a directory."
                     )
-                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=artifacts, errors=errors)
+                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=[], errors=errors)
 
                 status_file = installroot_path / "var" / "lib" / "dpkg" / "status"
                 if not status_file.exists():
@@ -225,7 +225,7 @@ class AptPlugin(OfflinePlugin):
                         f"[apt] base_installroot missing status file at {status_file}. "
                         "Ensure this is a valid Ubuntu/Debian root."
                     )
-                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=artifacts, errors=errors)
+                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=[], errors=errors)
 
                 install_cmd.extend(["-o", f"Dir::State::status={status_file}"])
                 if ctx.verbose:
@@ -242,7 +242,7 @@ class AptPlugin(OfflinePlugin):
             res = _run(install_cmd)
             if res.returncode != 0:
                 errors.append(f"[apt] apt-get install failed to resolve packages: {res.stderr.strip()}")
-                return PluginResult(success=False, message="Dependency resolution failed", artifacts=artifacts, errors=errors)
+                return PluginResult(success=False, message="Dependency resolution failed", artifacts=[], errors=errors)
 
             # Output lines look like:
             # 'http://archive.ubuntu.com/.../podman_4.9.3_amd64.deb' podman_4.9.3_amd64.deb 13408626 MD5Sum:...

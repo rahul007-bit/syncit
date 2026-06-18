@@ -27,7 +27,7 @@ spec:
     # matches the target. A warning will be printed during pack.
     - name: Install Kubernetes packages
       plugin: apt
-      base_installroot: /opt/syncit-roots/ubuntu2404-minimal
+      # base_installroot: /opt/syncit-roots/ubuntu2404-minimal
       repos:
         - name: kubernetes
           url: "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /"
@@ -40,7 +40,7 @@ spec:
     # ─── 2. CRI-O container runtime ─────────────────────────────────────────────
     - name: Install CRI-O
       plugin: apt
-      base_installroot: /opt/syncit-roots/ubuntu2404-minimal
+      # base_installroot: /opt/syncit-roots/ubuntu2404-minimal
       repos:
         - name: crio
           url: "deb [signed-by=/etc/apt/keyrings/crio.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v1.35/deb/ /"
@@ -51,14 +51,14 @@ spec:
     # ─── 3. Podman (from Ubuntu universe — no extra repo needed) ────────────────
     - name: Install Podman
       plugin: apt
-      base_installroot: /opt/syncit-roots/ubuntu2404-minimal
+      # base_installroot: /opt/syncit-roots/ubuntu2404-minimal
       packages:
         - podman
 
     # ─── 4. PostgreSQL 14 ────────────────────────────────────────────────────────
     - name: Install PostgreSQL 14
       plugin: apt
-      base_installroot: /opt/syncit-roots/ubuntu2404-minimal
+      # base_installroot: /opt/syncit-roots/ubuntu2404-minimal
       repos:
         - name: pgdg
           url: "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main"

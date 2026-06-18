@@ -227,7 +227,13 @@ class AptPlugin(OfflinePlugin):
                     )
                     return PluginResult(success=False, message="Invalid base_installroot", artifacts=[], errors=errors)
 
-                install_cmd.extend(["-o", f"Dir::State::status={status_file}"])
+                install_cmd.extend([
+                    "-o", f"Dir::State::status={status_file}",
+                    # Disable binary caches so APT is forced to read the custom status file fresh
+                    # otherwise it will use the host's installed state and skip required dependencies
+                    "-o", "Dir::Cache::pkgcache=",
+                    "-o", "Dir::Cache::srcpkgcache="
+                ])
                 if ctx.verbose:
                     rprint(f"[apt] Resolving deps against installroot: {installroot_path}")
             else:
@@ -246,7 +252,7 @@ class AptPlugin(OfflinePlugin):
 
             # Output lines look like:
             # 'http://archive.ubuntu.com/.../podman_4.9.3_amd64.deb' podman_4.9.3_amd64.deb 13408626 MD5Sum:...
-            all_pkgs: set[str] = set()
+            download_targets: set[str] = set()
             for line in res.stdout.splitlines():
                 line = line.strip()
                 if not line or not line.startswith("'"):
@@ -254,20 +260,34 @@ class AptPlugin(OfflinePlugin):
                 parts = line.split()
                 if len(parts) >= 2:
                     filename = parts[1]
-                    # package name is everything before the first underscore
-                    pkg_name = filename.split("_", 1)[0]
-                    all_pkgs.add(pkg_name)
+                    # Reconstruct exact pkg=version from the filename to preserve strict version pins
+                    m = re.match(r"^([^_]+)_([^_]+)_[^.]+\.deb$", filename)
+                    if m:
+                        pkg_name = m.group(1)
+                        # apt-get download needs epochs unescaped (e.g. %3a -> :)
+                        version = m.group(2).replace("%3a", ":")
+                        download_targets.add(f"{pkg_name}={version}")
+                    else:
+                        # Fallback for unusually named packages
+                        pkg_name = filename.split("_", 1)[0]
+                        download_targets.add(pkg_name)
 
             # Always ensure explicitly requested packages are included in the download list
-            for p in packages:
-                all_pkgs.add(p.split("=")[0].split("/")[0].split(":")[0])
+            # (In case they were skipped by apt because they were present in the status file)
+            explicit_names = {p.split("=")[0].split("/")[0].split(":")[0]: p for p in packages}
+            resolved_names = {t.split("=")[0] for t in download_targets}
+            
+            for name, full_p in explicit_names.items():
+                if name not in resolved_names:
+                    download_targets.add(full_p)
 
-            sorted_pkgs = sorted(list(all_pkgs))
+            sorted_pkgs = sorted(list(download_targets))
             total_dl = len(sorted_pkgs)
             if ctx.verbose:
                 rprint(f"[cyan]→[/] Resolved {total_dl} packages to download")
 
             # ── Phase 2: Download all resolved packages with caching ──────
+            import tempfile
             cache_dir = Path("~/.cache/syncit/apt").expanduser()
             cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -275,32 +295,43 @@ class AptPlugin(OfflinePlugin):
                 if ctx.verbose:
                     rprint(f"[cyan]→[/] Processing: {p} ({i}/{total_dl})...")
 
-                cand = list(cache_dir.glob(f"{p}_*.deb"))
+                p_name = p.split("=")[0]
+                version = p.split("=")[1] if "=" in p else None
+                
+                if version:
+                    enc_version = version.replace(":", "%3a")
+                    cand = list(cache_dir.glob(f"{p_name}_{enc_version}_*.deb"))
+                else:
+                    cand = list(cache_dir.glob(f"{p_name}_*.deb"))
+
                 if not ctx.no_cache and cand:
                     latest = max(cand, key=lambda x: x.stat().st_mtime)
                     if ctx.verbose:
                         rprint(f"    [dim]Using cached: {latest.name}[/dim]")
-                else:
-                    if ctx.verbose:
-                        action = "Forced re-download" if ctx.no_cache else "Downloading"
-                        rprint(f"    [dim]{action}: {p}...[/dim]")
-                    
-                    # Clean up old cached versions of this specific package
-                    for old_f in cache_dir.glob(f"{p}_*.deb"):
-                        old_f.unlink(missing_ok=True)
+                    shutil.copy2(str(latest), str(deb_dir / latest.name))
+                    continue
 
-                    dl_res = _run(["apt-get", "download", p] + extra_opts, cwd=str(cache_dir))
+                if ctx.verbose:
+                    action = "Forced re-download" if ctx.no_cache else "Downloading"
+                    rprint(f"    [dim]{action}: {p}...[/dim]")
+                
+                with tempfile.TemporaryDirectory() as td:
+                    dl_res = _run(["apt-get", "download", p] + extra_opts, cwd=td)
                     if dl_res.returncode != 0:
                         errors.append(f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}")
                         continue
-
-                # Copy from cache to bundle debs dir
-                cand_after = list(cache_dir.glob(f"{p}_*.deb"))
-                if cand_after:
-                    latest_after = max(cand_after, key=lambda x: x.stat().st_mtime)
-                    shutil.copy2(str(latest_after), str(deb_dir / latest_after.name))
-                else:
-                    errors.append(f"[apt] Could not find downloaded .deb for '{p}' in cache")
+                        
+                    downloaded_files = list(Path(td).glob("*.deb"))
+                    if not downloaded_files:
+                        errors.append(f"[apt] apt-get download succeeded but no .deb found for '{p}'")
+                        continue
+                        
+                    dl_file = downloaded_files[0]
+                    cache_target = cache_dir / dl_file.name
+                    
+                    # Store in cache and copy to bundle
+                    shutil.copy2(str(dl_file), str(cache_target))
+                    shutil.copy2(str(dl_file), str(deb_dir / dl_file.name))
 
             # ── Phase 3: Generate Packages index ──────────────────────────
             if ctx.verbose:
@@ -450,7 +481,7 @@ class AptPlugin(OfflinePlugin):
             )
 
         # 6. Install
-        inst_cmd = ["apt-get", "install", "-y"] + to_install
+        inst_cmd = ["apt-get", "install", "-y", "--no-install-recommends"] + to_install
         inst_res = _run(inst_cmd)
         if inst_res.returncode != 0:
             return PluginResult(

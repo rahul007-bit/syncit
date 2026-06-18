@@ -250,10 +250,53 @@ class AptPlugin(OfflinePlugin):
                     errors=errors,
                 )
 
+            # ── Phase 1b: Filter out base-system packages ─────────────────
+            # Packages with Priority: required/important or Essential: yes are
+            # guaranteed to be present on any Ubuntu installation. Bundling them
+            # wastes space and can cause conflicts when apt tries to reinstall them.
+            # We always keep packages explicitly requested by the user.
+            explicit_pkgs = {p.split("=")[0].split("/")[0] for p in packages}
+            skipped_base: list[str] = []
+            if ctx.verbose:
+                rprint("[cyan]→[/] Filtering base-system packages (required/important/essential)...")
+
+            filtered_pkgs: set[str] = set()
+            for pkg in all_pkgs:
+                if pkg in explicit_pkgs:
+                    # Always keep explicitly requested packages
+                    filtered_pkgs.add(pkg)
+                    continue
+                info = _run(["apt-cache", "show", pkg] + extra_opts)
+                if info.returncode != 0:
+                    filtered_pkgs.add(pkg)
+                    continue
+                priority = ""
+                essential = ""
+                for ln in info.stdout.splitlines():
+                    if ln.startswith("Priority: "):
+                        priority = ln.split(": ", 1)[1].strip().lower()
+                    if ln.startswith("Essential: "):
+                        essential = ln.split(": ", 1)[1].strip().lower()
+                    if priority and essential:
+                        break
+                if priority in ("required", "important") or essential == "yes":
+                    skipped_base.append(pkg)
+                else:
+                    filtered_pkgs.add(pkg)
+
+            if ctx.verbose and skipped_base:
+                rprint(
+                    f"    [dim]Skipped {len(skipped_base)} base-system package(s) "
+                    f"(already on every Ubuntu install): {', '.join(sorted(skipped_base)[:8])}"
+                    + (" ..." if len(skipped_base) > 8 else "") + "[/dim]"
+                )
+
+            all_pkgs = filtered_pkgs
             sorted_pkgs = sorted(list(all_pkgs))
             total_dl = len(sorted_pkgs)
             if ctx.verbose:
-                rprint(f"[cyan]→[/] Resolved {total_dl} packages (including transitive deps)")
+                rprint(f"[cyan]→[/] Resolved {total_dl} packages (after base-system filter)")
+
 
             # ── Phase 2: Download all resolved packages with caching ──────
             cache_dir = Path("~/.cache/syncit/apt").expanduser()

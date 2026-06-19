@@ -410,6 +410,7 @@ Optionally, declare upstream repositories for third-party packages:
 | `repos[].name`         | Yes      | Unique short name for the repo                   |
 | `repos[].url`          | Yes      | Full apt sources line (e.g., `deb [signed-by=...] https://... /`) |
 | `repos[].gpg_key`      | No       | URL to download the repository GPG key (stored in bundle for audit) |
+| `base_installroot`     | No       | Path to a minimal OS root for accurate dep resolution (see below) |
 
 During `pack`, repos are injected via `-o Dir::Etc::SourceParts=<temp>` — no system files
 are modified. GPG keys are stored in the bundle (`apt/keys/`) for audit and diff.
@@ -472,7 +473,59 @@ bundle-dev-tools-1.0.0/apt/
 - All transitive dependencies are automatically resolved and bundled
 - Already-installed packages are skipped during apply (idempotent)
 - Codename mismatch between pack and apply emits a warning but doesn't block
-- Uses `--no-install-recommends` style via the remote apply script
+
+---
+
+#### Dependency Resolution (`--no-install-recommends`)
+
+`syncit pack` and `syncit apply` both strictly use `--no-install-recommends`. This means that only **Strict Depends** are bundled, and **Recommended** or **Suggested** packages are ignored.
+
+This is an industry best-practice for air-gapped environments and containers because it prevents APT from pulling in hundreds of megabytes of optional GUI packages, fonts, or documentation.
+
+**What if I want a recommended feature?**
+If a package requires a "Recommended" dependency to enable a specific feature (for example, Podman requires `slirp4netns` and `uidmap` for rootless networking), you must explicitly list that dependency in your `packages` list:
+
+```yaml
+    - name: Install Podman
+      plugin: apt
+      packages:
+        - podman
+        - slirp4netns
+        - uidmap
+```
+By explicitly requesting it, `syncit pack` will resolve and bundle it along with its strict dependencies.
+
+---
+
+#### `base_installroot` — Accurate Dependency Resolution
+
+By default, `apt-get` resolves dependencies against the **build host's** installed package set (`/var/lib/dpkg/status`). This means:
+- If the build host has `systemd`, `libc6`, or `curl` already installed, APT skips them.
+- If the build host has extra packages not on a minimal target, those are silently omitted from the bundle.
+
+The result can be **under-bundling** if your development machine has more software installed than your clean target VM.
+
+**The fix:** point `base_installroot` to a minimal base OS root that mirrors a freshly-installed target node. APT then resolves as if installing into that clean environment, producing a bundle that contains exactly the right deps for the target.
+
+##### How to create a minimal installroot
+
+```bash
+# On your online Ubuntu/Debian build host:
+# 1. Install debootstrap
+sudo apt-get update && sudo apt-get install -y debootstrap
+
+# 2. Create a minimal Ubuntu 24.04 (noble) installroot
+sudo mkdir -p /opt/syncit-roots/ubuntu2404-minimal
+sudo debootstrap noble /opt/syncit-roots/ubuntu2404-minimal
+```
+
+Then, reference it in your manifest:
+```yaml
+    - name: Install Kubernetes packages
+      plugin: apt
+      base_installroot: /opt/syncit-roots/ubuntu2404-minimal
+      packages: [kubeadm, kubelet, kubectl]
+```
 
 ---
 

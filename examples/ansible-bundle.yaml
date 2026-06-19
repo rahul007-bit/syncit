@@ -16,3 +16,5 @@ spec:
       plugin: dnf
       packages:
         - ansible
+        - git-core
+        - python3-setuptools

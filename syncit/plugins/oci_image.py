@@ -181,7 +181,9 @@ class OciImagePlugin(OfflinePlugin):
 
                 if ctx.verbose:
                     print(f"[oci_image] Bundling {source} from cache layout...")
-                bundle_cmd = ["skopeo", "copy", f"oci:{cache_path}", f"oci-archive:{archive}"]
+                # We use docker-archive format because oci-archive natively drops tags 
+                # when loaded manually with podman/docker load. docker-archive preserves them.
+                bundle_cmd = ["skopeo", "copy", f"oci:{cache_path}", f"docker-archive:{archive}:{source}"]
                 bundle_res = _run(bundle_cmd)
                 if bundle_res.returncode != 0:
                     errors.append(f"[oci_image] Failed to bundle {source}: {bundle_res.stderr.strip()}")
@@ -197,9 +199,9 @@ class OciImagePlugin(OfflinePlugin):
                 
                 if ctx.verbose:
                     print(f"[oci_image] Bundling {source} via {pack_tool} save...")
-                # podman supports --format=oci-archive, docker does not.
+                # Both podman and docker use docker-archive format which preserves tags
                 if pack_tool == "podman":
-                    bundle_cmd = [pack_tool, "save", "--format=oci-archive", "-o", str(archive), source]
+                    bundle_cmd = [pack_tool, "save", "--format=docker-archive", "-o", str(archive), source]
                 else:
                     bundle_cmd = [pack_tool, "save", "-o", str(archive), source]
                     
@@ -281,15 +283,12 @@ class OciImagePlugin(OfflinePlugin):
                     print(f"[oci_image] Skipping already-loaded: {source}")
                 continue
 
-            # Prefer skopeo copy for loading — it correctly maps the full
-            # reference (including registry prefix) into the runtime store,
-            # avoiding the <none>:<none> issue that `podman/docker load` can
-            # produce with oci-archive tars.
+            # Prefer skopeo copy for loading
             if _has_cmd("skopeo") and runtime in ("docker", "podman"):
                 storage_driver = "containers-storage" if runtime == "podman" else "docker-daemon"
                 cmd = [
                     "skopeo", "copy",
-                    f"oci-archive:{archive}",
+                    f"docker-archive:{archive}",
                     f"{storage_driver}:{source}",
                 ]
                 result = _run(cmd)
@@ -428,11 +427,10 @@ class OciImagePlugin(OfflinePlugin):
             source = _normalize_ref(img["source"])
             safe = _safe_name(source)
             tar = f"$BUNDLE_DIR/{bundle_subdir}/images/{safe}.tar"
-            # skopeo path (preferred — correctly maps full reference into runtime store)
             load_lines.append(
                 f'  if command -v skopeo &>/dev/null; then\n'
                 f'    echo "  [oci_image] → skopeo copy {source}"\n'
-                f'    skopeo copy "oci-archive:{tar}" "$STORAGE_PREFIX:{source}"\n'
+                f'    skopeo copy "docker-archive:{tar}" "$STORAGE_PREFIX:{source}"\n'
                 f'  else\n'
                 f'    echo "  [oci_image] → $RUNTIME load {source}"\n'
                 f'    LOADED=$($RUNTIME load -i "{tar}" 2>&1 | grep -oP "(?<=Loaded image: ).*" | head -1 || true)\n'
@@ -459,10 +457,6 @@ else
 fi
 
 # Load each image individually with its exact reference preserved.
-# Using skopeo copy (preferred) avoids the <none>:<none> tag problem
-# that occurs when podman/docker load drops registry prefixes from
-# oci-archive tars. Falls back to runtime load + explicit tag if
-# skopeo is not available.
 {per_image_block}
 """
 

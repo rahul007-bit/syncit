@@ -117,14 +117,33 @@ def resolve_subtask(
     plugin_type: str,
     version: str,
     codename: str = "",
+    catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """
     Resolve a single subtask definition to a concrete task dict.
 
+    If a ``ref`` key is present, it looks up the referenced path in the catalog
+    (e.g., ``kubernetes.subtasks.packages``) and resolves it recursively.
     Picks ``templates[plugin_type]`` first; falls back to ``templates["any"]``
     for plugin-agnostic subtasks (OCI images, file downloads, etc.).
     Returns None if no matching template exists for this plugin type.
     """
+    if "ref" in subtask:
+        if not catalog:
+            catalog = get_catalog()
+        
+        ref_parts = subtask["ref"].split(".")
+        curr: Any = catalog
+        for part in ref_parts:
+            if isinstance(curr, dict) and part in curr:
+                curr = curr[part]
+            else:
+                return None
+                
+        if isinstance(curr, dict):
+            return resolve_subtask(curr, plugin_type, version, codename, catalog)
+        return None
+
     templates = subtask.get("templates", {})
     template = templates.get(plugin_type) or templates.get("any")
     if not template:

@@ -113,6 +113,7 @@ def _add_subtasks(
     pkg_version: str,
     codename: str,
     tasks: list,
+    catalog: dict,
 ) -> None:
     """Auto-add required subtasks; offer optional ones via checkbox."""
     subtasks = pkg_data.get("subtasks", {})
@@ -126,7 +127,7 @@ def _add_subtasks(
         label = subtask_def.get("label", key)
         required = subtask_def.get("required", False)
 
-        resolved = resolve_subtask(subtask_def, plugin_type, pkg_version, codename)
+        resolved = resolve_subtask(subtask_def, plugin_type, pkg_version, codename, catalog)
 
         if resolved is None:
             if required:
@@ -480,7 +481,7 @@ def create_cmd(
             if not pkg_version:  # cancelled
                 continue
 
-            _add_subtasks(pkg_data, plugin_type, pkg_version, codename, tasks)
+            _add_subtasks(pkg_data, plugin_type, pkg_version, codename, tasks, catalog)
 
     # ── Build and save manifest ───────────────────────────────────────────
     manifest = {

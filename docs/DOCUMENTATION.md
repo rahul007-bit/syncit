@@ -374,11 +374,12 @@ During the wizard:
    - **Codename** (e.g., `noble`, `jammy`, `bookworm` for apt)
    - **Architecture** (amd64, arm64)
 2. **Task Definition**: A loop where you can choose:
-   - **Search catalog**: Interactively search and select packages defined in the catalog registry (e.g., Kubernetes, CRI-O, PostgreSQL, Podman) and choose versions.
+   - **Search catalog**: Interactively search and select packages defined in the catalog registry (e.g., Kubernetes, CRI-O, PostgreSQL, Podman) and choose versions. Required subtasks are added automatically, and optional subtasks are presented in a checklist.
+   - **Create custom task**: An interactive wizard to build a task from scratch (apt, dnf, pip, oci_image, file). You can optionally save it to the local catalog for future reuse.
    - **Add empty task**: Manually define a blank task with placeholders to edit later.
+   - **Reload catalog**: Reloads the catalog registry (useful if you just edited your local catalog JSON).
    - **Done**: Finish task definition and generate the manifest.
 3. **Registry Resolution**: When selecting a catalog package, `syncit` automatically resolves templates for your target packaging tool (`apt` or `dnf`), replacing placeholders like `{version}`, `{major_minor}`, and `{codename}` inside repo URLs, GPG keys, and packages.
-4. **OCI Container Images**: If the catalog package has associated container images (e.g., Kubernetes control plane images), the wizard will ask if you want to automatically add them using the `oci_image` plugin.
 5. **Immediate Execution**: Once saved to a file, the wizard prompts to run immediately:
    - **Pack bundle locally**: Performs a local `syncit pack`.
    - **Pack and apply remotely**: Prompts for an inventory file and a target host to perform a remote `syncit up`.
@@ -1907,69 +1908,115 @@ spec:
 
 **syncit** maintains a package catalog to simplify creating manifests for common third-party software (such as Kubernetes, CRI-O, PostgreSQL, and Podman) without having to manually search for package repositories, GPG key URLs, and exact package versions.
 
-### Online vs. Offline Operation
+### Catalog Merge Hierarchy
 
-To ensure catalog information is fresh while remaining resilient in air-gapped environments:
-1. **Online Lookup**: The registry client first attempts to fetch the latest catalog metadata from GitHub (`https://raw.githubusercontent.com/rahul007-bit/syncit/main/syncit/registry/catalog.json`). It uses a short 3-second timeout.
-2. **Local Fallback**: If the machine is offline, behind a proxy, or the lookup fails/times out, `syncit` transparently falls back to using the local, bundled `syncit/registry/catalog.json` copy.
+To ensure catalog information is fresh, customizable, and resilient in air-gapped environments, `syncit` merges catalogs from multiple sources. **Higher priority sources completely override lower priority ones** for any given package ID.
 
-### Catalog Schema
+1. **Project Catalog** (`./syncit-catalog.json`) — Checked into your git repo to share custom team tasks. *(Highest priority)*
+2. **User Catalog** (`~/.config/syncit/catalog.json`) — Your personal custom tasks, available across all projects.
+3. **Remote Catalog** (`https://raw.githubusercontent.com/rahul007-bit/syncit/main/syncit/registry/catalog.json`) — Fetched online with a 3-second timeout for the latest community definitions.
+4. **Bundled Catalog** — The fallback shipped inside the `syncit` python package in case you are offline. *(Lowest priority)*
 
-The catalog registry is defined as a JSON file (`syncit/registry/catalog.json`) mapping package IDs to metadata structures:
+### Catalog Schema & Subtask Model
+
+The catalog registry is defined as a JSON file mapping package IDs to metadata and a collection of **subtasks**. This allows complex deployments (like Kubernetes + Container Images + CLI tools) to be grouped under a single searchable catalog entry.
 
 ```json
 {
-  "package-id": {
-    "description": "Human readable description",
-    "category": "infrastructure|runtime|database|...",
+  "kubernetes": {
+    "description": "Kubernetes control plane (kubeadm, kubelet, kubectl)",
+    "category": "infrastructure",
     "versions": ["1.35.5", "1.34.4"],
-    "templates": {
-      "apt": {
-        "name": "Task name",
-        "plugin": "apt",
-        "repos": [
-          {
-            "name": "repo-name",
-            "url": "deb [signed-by=/etc/apt/keyrings/repo.gpg] https://example.com/v{major_minor}/deb/ /",
-            "gpg_key": "https://example.com/v{major_minor}/deb/Release.key"
+    "subtasks": {
+      "packages": {
+        "label": "Install Kubernetes packages",
+        "required": true,
+        "templates": {
+          "apt": {
+            "name": "Install Kubernetes",
+            "plugin": "apt",
+            "repos": [
+              {
+                "name": "kubernetes",
+                "url": "deb [signed-by=/etc/apt/keyrings/k8s.gpg] https://pkgs.k8s.io/core:/stable:/v{major_minor}/deb/ /",
+                "gpg_key": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/deb/Release.key"
+              }
+            ],
+            "packages": ["kubeadm={version}-*", "kubelet={version}-*", "kubectl={version}-*"]
+          },
+          "dnf": {
+            "name": "Install Kubernetes",
+            "plugin": "dnf",
+            "repos": [ ... ],
+            "packages": ["kubeadm-{version}", "kubelet-{version}", "kubectl-{version}"]
           }
-        ],
-        "packages": [
-          "package-name={version}-1.1"
-        ]
+        }
       },
-      "dnf": {
-        "name": "Task name",
-        "plugin": "dnf",
-        "repos": [
-          {
-            "name": "repo-name",
-            "url": "https://example.com/v{major_minor}/rpm/",
-            "gpg_key": "https://example.com/v{major_minor}/rpm/repodata/repomd.xml.key",
-            "gpgcheck": true
+      "control-plane-images": {
+        "label": "Pull Kubernetes Control Plane Images",
+        "required": false,
+        "templates": {
+          "any": {
+            "name": "Pull Kubernetes Control Plane Images",
+            "plugin": "oci_image",
+            "images": [
+              "registry.k8s.io/kube-apiserver:v{version}",
+              "registry.k8s.io/kube-controller-manager:v{version}",
+              "registry.k8s.io/kube-scheduler:v{version}",
+              "registry.k8s.io/kube-proxy:v{version}",
+              "registry.k8s.io/pause:3.10",
+              "registry.k8s.io/etcd:3.5.15-0",
+              "registry.k8s.io/coredns/coredns:v1.11.3"
+            ]
           }
-        ],
-        "packages": [
-          "package-name-{version}"
-        ]
+        }
       }
-    },
-    "images": [
-      {
-        "name": "Pull Container Images",
-        "plugin": "oci_image",
-        "images": [
-          "registry.example.com/image:v{version}"
-        ]
-      }
-    ]
+    }
   }
 }
 ```
 
+- **`required: true`**: Automatically added to the bundle without prompting.
+- **`required: false`**: The wizard presents these in a multi-select checklist as optional addons.
+- **`templates["apt" | "dnf"]`**: OS-specific tasks. The wizard picks the one matching the bundle's `distro`.
+- **`templates["any"]`**: OS-agnostic tasks (like `oci_image`, `pip`, `file`). These are used regardless of the target OS.
+
+### Subtask Linking (`ref`)
+
+To avoid duplicating complex templates (like Kubernetes or PostgreSQL) when creating your own custom entries, you can use the `ref` key to link to an existing subtask elsewhere in the catalog.
+
+```json
+{
+  "my-custom-stack": {
+    "description": "My company's standard offline stack",
+    "category": "custom",
+    "versions": ["latest"],
+    "subtasks": {
+      "k8s": {
+        "label": "Install Kubernetes",
+        "required": true,
+        "ref": "kubernetes.subtasks.packages"
+      },
+      "k8s-images": {
+        "label": "Pull Kubernetes Images",
+        "required": true,
+        "ref": "kubernetes.subtasks.control-plane-images"
+      },
+      "crio": {
+        "label": "Install CRI-O",
+        "required": true,
+        "ref": "cri-o.subtasks.packages"
+      }
+    }
+  }
+}
+```
+
+When `syncit create` encounters a `ref`, it dynamically traverses the catalog and resolves the linked template as if it were defined inline.
+
 ### Template Variable Resolution
 
-When you select a package and version in the `syncit create` wizard, the following placeholder tokens inside the template strings are dynamically replaced:
+When you select a package and version in the `syncit create` wizard, placeholder tokens inside the template strings are dynamically replaced:
 - `{version}`: The exact version string chosen by the user (e.g., `1.35.5`).
-- `{major_minor}`: The major and minor portion of the version, split by `.` (e.g., `1.35.5` -> `1.35`). This is useful for third-party repository URLs that structure directories by minor release.
-- `{codename}`: The target OS codename (e.g., `noble`, `bookworm`), primarily used for Debian/Ubuntu repository distribution fields.
+- `{major_minor}`: The major and minor portion of the version, split by `.` (e.g., `1.35.5` -> `1.35`). Useful for repository URLs that use minor release paths.
+- `{codename}`: The target OS codename (e.g., `noble`, `bookworm`), primarily used for Debian/Ubuntu repository fields.

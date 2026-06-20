@@ -7,25 +7,38 @@ from typing import Any
 CATALOG_URL = "https://raw.githubusercontent.com/rahul007-bit/syncit/main/syncit/registry/catalog.json"
 LOCAL_CATALOG = Path(__file__).parent / "catalog.json"
 
+def _uses_subtask_schema(catalog: dict) -> bool:
+    """Return True if the catalog uses the current subtask-based schema."""
+    return any("subtasks" in entry for entry in catalog.values())
+
+
 def get_catalog() -> dict[str, Any]:
     """
-    Fetch the catalog. Try remote GitHub first (3 s timeout), fallback to local JSON.
-    Merge order: remote → local bundled copy.
+    Fetch the catalog.
+
+    Always loads the local bundled copy as the baseline. Then attempts to
+    fetch the remote version from GitHub; if the remote uses the current
+    subtask schema it is returned instead. This prevents a stale or
+    incompatible remote from overriding a newer local copy.
     """
+    # Load local bundled copy as the guaranteed fallback
+    local_catalog: dict = {}
+    if LOCAL_CATALOG.exists():
+        with open(LOCAL_CATALOG, "r", encoding="utf-8") as f:
+            local_catalog = json.load(f)
+
+    # Try remote — only use it if it speaks the current schema
     try:
         req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "syncit"})
         with urllib.request.urlopen(req, timeout=3) as response:
             if response.status == 200:
-                return json.loads(response.read().decode("utf-8"))
+                remote = json.loads(response.read().decode("utf-8"))
+                if _uses_subtask_schema(remote):
+                    return remote
     except (urllib.error.URLError, json.JSONDecodeError):
         pass
 
-    # Fallback to local bundled copy
-    if LOCAL_CATALOG.exists():
-        with open(LOCAL_CATALOG, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    return {}
+    return local_catalog
 
 
 def resolve_template(

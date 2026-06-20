@@ -28,6 +28,7 @@ then apply them all on an air-gapped (offline) VM — no proxy, no internet requ
 9. [State & Idempotency](#9-state--idempotency)
 10. [Zero-Dependency Remote Apply](#10-zero-dependency-remote-apply)
 11. [End-to-End Workflow Examples](#11-end-to-end-workflow-examples)
+12. [Catalog Registry](#12-catalog-registry)
 
 ---
 
@@ -356,6 +357,32 @@ Use `--` before the command to separate options from the command itself:
 ```bash
 syncit exec -i inv.yaml -t db-server -- sudo systemctl restart postgresql
 ```
+
+### `syncit create`
+
+Launches an interactive wizard to guide you through creating a new bundle manifest (`bundle.yaml`) file. The wizard helps you configure bundle metadata, search the local/remote catalog registry, select packages and versions, automatically generate third-party repository definitions, and optionally pack or deploy the bundle immediately.
+
+```bash
+syncit create
+```
+
+During the wizard:
+1. **Bundle Metadata**: You will be prompted to input:
+   - **Bundle Name**
+   - **Version** (default: `1.0.0`)
+   - **Target Distro** (Ubuntu, Debian, RHEL, Rocky, AlmaLinux)
+   - **Codename** (e.g., `noble`, `jammy`, `bookworm` for apt)
+   - **Architecture** (amd64, arm64)
+2. **Task Definition**: A loop where you can choose:
+   - **Search catalog**: Interactively search and select packages defined in the catalog registry (e.g., Kubernetes, CRI-O, PostgreSQL, Podman) and choose versions.
+   - **Add empty task**: Manually define a blank task with placeholders to edit later.
+   - **Done**: Finish task definition and generate the manifest.
+3. **Registry Resolution**: When selecting a catalog package, `syncit` automatically resolves templates for your target packaging tool (`apt` or `dnf`), replacing placeholders like `{version}`, `{major_minor}`, and `{codename}` inside repo URLs, GPG keys, and packages.
+4. **OCI Container Images**: If the catalog package has associated container images (e.g., Kubernetes control plane images), the wizard will ask if you want to automatically add them using the `oci_image` plugin.
+5. **Immediate Execution**: Once saved to a file, the wizard prompts to run immediately:
+   - **Pack bundle locally**: Performs a local `syncit pack`.
+   - **Pack and apply remotely**: Prompts for an inventory file and a target host to perform a remote `syncit up`.
+   - **Not yet**: Saves the manifest and exits.
 
 ---
 
@@ -1873,3 +1900,76 @@ spec:
     etc.), add the upstream repo on the online machine **before** running `syncit pack`. The
     offline VM gets the downloaded packages from the bundle — no remote repos needed there.
     See [Repository Requirements](#repository-requirements-for-third-party-packages) for examples.
+
+---
+
+## 12. Catalog Registry
+
+**syncit** maintains a package catalog to simplify creating manifests for common third-party software (such as Kubernetes, CRI-O, PostgreSQL, and Podman) without having to manually search for package repositories, GPG key URLs, and exact package versions.
+
+### Online vs. Offline Operation
+
+To ensure catalog information is fresh while remaining resilient in air-gapped environments:
+1. **Online Lookup**: The registry client first attempts to fetch the latest catalog metadata from GitHub (`https://raw.githubusercontent.com/rahul007-bit/syncit/main/syncit/registry/catalog.json`). It uses a short 3-second timeout.
+2. **Local Fallback**: If the machine is offline, behind a proxy, or the lookup fails/times out, `syncit` transparently falls back to using the local, bundled `syncit/registry/catalog.json` copy.
+
+### Catalog Schema
+
+The catalog registry is defined as a JSON file (`syncit/registry/catalog.json`) mapping package IDs to metadata structures:
+
+```json
+{
+  "package-id": {
+    "description": "Human readable description",
+    "category": "infrastructure|runtime|database|...",
+    "versions": ["1.35.5", "1.34.4"],
+    "templates": {
+      "apt": {
+        "name": "Task name",
+        "plugin": "apt",
+        "repos": [
+          {
+            "name": "repo-name",
+            "url": "deb [signed-by=/etc/apt/keyrings/repo.gpg] https://example.com/v{major_minor}/deb/ /",
+            "gpg_key": "https://example.com/v{major_minor}/deb/Release.key"
+          }
+        ],
+        "packages": [
+          "package-name={version}-1.1"
+        ]
+      },
+      "dnf": {
+        "name": "Task name",
+        "plugin": "dnf",
+        "repos": [
+          {
+            "name": "repo-name",
+            "url": "https://example.com/v{major_minor}/rpm/",
+            "gpg_key": "https://example.com/v{major_minor}/rpm/repodata/repomd.xml.key",
+            "gpgcheck": true
+          }
+        ],
+        "packages": [
+          "package-name-{version}"
+        ]
+      }
+    },
+    "images": [
+      {
+        "name": "Pull Container Images",
+        "plugin": "oci_image",
+        "images": [
+          "registry.example.com/image:v{version}"
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Template Variable Resolution
+
+When you select a package and version in the `syncit create` wizard, the following placeholder tokens inside the template strings are dynamically replaced:
+- `{version}`: The exact version string chosen by the user (e.g., `1.35.5`).
+- `{major_minor}`: The major and minor portion of the version, split by `.` (e.g., `1.35.5` -> `1.35`). This is useful for third-party repository URLs that structure directories by minor release.
+- `{codename}`: The target OS codename (e.g., `noble`, `bookworm`), primarily used for Debian/Ubuntu repository distribution fields.

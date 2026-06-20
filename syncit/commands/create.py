@@ -100,6 +100,7 @@ def _catalog_search_prompt(catalog: dict) -> str | None:
         "Select package (↑↓ arrows, type to filter):",
         choices=choices,
         use_search_filter=True,
+        use_jk_keys=False,
         use_indicator=True,
     ).ask()
 

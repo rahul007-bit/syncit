@@ -35,8 +35,6 @@ def resolve_template(
     Resolves variables like {version}, {major_minor}, {codename} in the template.
     Returns a new dict (deep copy with replaced strings).
     """
-    import copy
-    
     # Calculate major_minor from version
     # e.g., '1.35.5' -> '1.35'
     parts = version.split('.')

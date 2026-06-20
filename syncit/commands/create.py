@@ -7,7 +7,7 @@ from rich.console import Console
 
 from syncit.registry import get_catalog, resolve_template
 from syncit.commands.pack import run_pack
-from syncit.commands.up import up_cmd
+from syncit.commands.up import run_up
 
 console = Console()
 
@@ -77,7 +77,6 @@ def create_cmd() -> None:
             "Search packages:",
             choices=choices,
             use_indicator=True,
-            use_shortcuts=True
         ).ask()
         
         if not pkg_key:
@@ -159,7 +158,7 @@ def create_cmd() -> None:
     
     if run_choice == "pack":
         try:
-            run_pack(manifest=save_file, output=output_dir, dry_run=False)
+            run_pack(manifest=save_file, output=output_dir, dry_run=False, verbose=True)
         except Exception as e:
             rprint(f"[red]Pack failed:[/] {e}")
             raise typer.Exit(1)
@@ -190,12 +189,10 @@ def create_cmd() -> None:
             raise typer.Exit()
             
         try:
-            up_cmd(
+            run_up(
                 manifest=save_file,
-                output=output_dir,
                 inventory=Path(inventory_path),
                 target=target_host,
-                dry_run=False
             )
         except Exception as e:
             rprint(f"[red]Up failed:[/] {e}")

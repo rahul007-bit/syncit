@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 
 from syncit.commands.apply import apply_cmd
+from syncit.commands.create import create_cmd
 from syncit.commands.diff import diff_cmd
 from syncit.commands.exec_cmd import exec_cmd
 from syncit.commands.pack import pack_cmd
@@ -51,6 +52,7 @@ app.command("apply", help="Run zero-dependency remote apply on targeted VMs via 
 app.command("up", help="Pack a bundle and immediately apply it remotely.")(up_cmd)
 app.command("diff", help="Compare two bundle versions and show what changed.")(diff_cmd)
 app.command("exec", help="Run a shell command on remote hosts via SSH.")(exec_cmd)
+app.command("create", help="Create a new bundle interactively.")(create_cmd)
 
 
 if __name__ == "__main__":

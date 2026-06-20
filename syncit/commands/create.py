@@ -64,12 +64,34 @@ def _dump_manifest(manifest: dict, path: Path) -> None:
         )
 
 
-def get_package_choices(catalog: dict) -> list[questionary.Choice]:
-    choices = []
+def _catalog_search_prompt(catalog: dict) -> str | None:
+    """
+    Keyword-searchable catalog picker using autocomplete.
+    Type any part of the entry ID, description, or category to filter.
+    Returns the catalog key selected, or None if cancelled.
+    """
+    if not catalog:
+        return None
+
+    # Map display label → catalog key so we can look up after selection.
+    choice_map: dict[str, str] = {}
     for key, data in catalog.items():
         desc = data.get("description", "")
-        choices.append(questionary.Choice(title=f"{key:<18} ({desc})", value=key))
-    return choices
+        category = data.get("category", "")
+        label = f"{key:<18} [{category}]  {desc}"
+        choice_map[label] = key
+
+    labels = list(choice_map.keys())
+
+    selected = questionary.autocomplete(
+        "Search packages (type to filter):",
+        choices=labels,
+        match_middle=True,
+        ignore_case=True,
+        validate=lambda x: x in choice_map or not x,
+    ).ask()
+
+    return choice_map.get(selected) if selected else None
 
 
 def _add_subtasks(
@@ -389,11 +411,23 @@ def create_cmd(
         rprint("\n[bold]Add a task[/bold]")
         action = questionary.select(
             "What next?",
-            choices=["Search catalog", "Create custom task", "Add empty task", "Done"],
+            choices=[
+                "Search catalog",
+                "Create custom task",
+                "Add empty task",
+                "Reload catalog",
+                "Done",
+            ],
         ).ask()
 
         if action == "Done":
             break
+
+        elif action == "Reload catalog":
+            rprint("[cyan]Reloading catalog...[/cyan]")
+            catalog = get_catalog()
+            rprint(f"[green]Catalog reloaded[/green] — {len(catalog)} entries: {', '.join(sorted(catalog.keys()))}")
+            continue
 
         elif action == "Add empty task":
             task_name = questionary.text("Task name:").ask()
@@ -418,16 +452,11 @@ def create_cmd(
                     _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
 
         else:  # Search catalog
-            choices = get_package_choices(catalog)
-            if not choices:
-                rprint("[red]Catalog is empty.[/red]")
+            if not catalog:
+                rprint("[red]Catalog is empty. Try 'Reload catalog'.[/red]")
                 continue
 
-            pkg_key = questionary.select(
-                "Select package:",
-                choices=choices,
-                use_indicator=True,
-            ).ask()
+            pkg_key = _catalog_search_prompt(catalog)
             if not pkg_key:
                 continue
 

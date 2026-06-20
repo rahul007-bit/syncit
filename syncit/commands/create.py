@@ -2,6 +2,7 @@ import typer
 import yaml
 import questionary
 from pathlib import Path
+from typing import Optional
 from rich import print as rprint
 from rich.console import Console
 
@@ -10,6 +11,56 @@ from syncit.commands.pack import run_pack
 from syncit.commands.up import run_up
 
 console = Console()
+
+DISTRO_CHOICES = ["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux"]
+APT_DISTROS = {"Ubuntu", "Debian"}
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _detect_codename() -> str:
+    """Read the local OS codename from /etc/os-release, or return ''."""
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                if line.startswith("VERSION_CODENAME="):
+                    return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def _load_manifest(path: Path) -> dict:
+    with open(path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _dump_manifest(manifest: dict, path: Path) -> None:
+    """Write YAML with repo URLs always on a single line (no PyYAML line-folding)."""
+    import sys
+
+    class _NoFoldDumper(yaml.Dumper):
+        def __init__(self, stream, **kwargs):
+            super().__init__(stream, **kwargs)
+            # Override after super().__init__ — the only reliable way to stop
+            # PyYAML from folding long scalars in write_plain / write_double_quoted.
+            self.best_width = sys.maxsize
+
+    with open(path, "w") as f:
+        yaml.dump(
+            manifest, f,
+            Dumper=_NoFoldDumper,
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        )
+
+
+
+
+
 
 
 def get_package_choices(catalog: dict) -> list[questionary.Choice]:
@@ -27,10 +78,7 @@ def _add_subtasks(
     codename: str,
     tasks: list,
 ) -> None:
-    """
-    Iterate the subtasks for a catalog entry, auto-add required ones, and prompt
-    the user to select optional ones via a multi-select checklist.
-    """
+    """Auto-add required subtasks; offer optional ones via checkbox."""
     subtasks = pkg_data.get("subtasks", {})
     if not subtasks:
         rprint("[yellow]Warning: catalog entry has no subtasks defined.[/yellow]")
@@ -73,37 +121,101 @@ def _add_subtasks(
             rprint(f"[green]Task added:[/] {name}")
 
 
-def create_cmd() -> None:
+# ---------------------------------------------------------------------------
+# Command
+# ---------------------------------------------------------------------------
+
+def create_cmd(
+    manifest_file: Optional[Path] = typer.Argument(
+        None,
+        help="Path to an existing bundle.yaml to update. Omit to create a new one.",
+        exists=False,   # allow non-existing path for new files
+        file_okay=True,
+        dir_okay=False,
+    ),
+) -> None:
     catalog = get_catalog()
     if not catalog:
         rprint("[yellow]Warning: Could not fetch catalog. Proceeding anyway.[/yellow]")
         catalog = {}
 
+    # ── Update vs. create mode ────────────────────────────────────────────
+    existing: dict = {}
+    is_update = False
+    if manifest_file and manifest_file.exists():
+        is_update = True
+        existing = _load_manifest(manifest_file)
+        rprint(f"\n[bold cyan]Update mode:[/] loaded [green]{manifest_file}[/green]")
+        existing_tasks = existing.get("spec", {}).get("tasks", [])
+        if existing_tasks:
+            rprint(f"[dim]Existing tasks ({len(existing_tasks)}):[/dim]")
+            for t in existing_tasks:
+                rprint(f"  [dim]· {t.get('name', '?')} ({t.get('plugin', '?')})[/dim]")
+        rprint()
+
+    # ── Metadata prompts (pre-filled from existing file in update mode) ───
     rprint("\n[bold]Bundle Metadata[/bold]")
-    bundle_name = questionary.text("Bundle name:").ask()
+    meta = existing.get("metadata", {})
+    targets = existing.get("spec", {}).get("targets", {})
+
+    bundle_name = questionary.text(
+        "Bundle name:", default=meta.get("name", "")
+    ).ask()
     if not bundle_name:
         raise typer.Exit()
 
-    version = questionary.text("Version:", default="1.0.0").ask()
+    version = questionary.text("Version:", default=meta.get("version", "1.0.0")).ask()
 
+    # Distro — pre-select existing value when updating
+    existing_distro_raw = targets.get("distro", "")
+    existing_distro = existing_distro_raw.capitalize() if existing_distro_raw else ""
+    default_distro = existing_distro if existing_distro in DISTRO_CHOICES else "Ubuntu"
     distro_choice = questionary.select(
         "Target distro:",
-        choices=["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux"],
+        choices=DISTRO_CHOICES,
+        default=default_distro,
     ).ask()
 
-    if distro_choice in ["Ubuntu", "Debian"]:
+    # ── Codename with auto-detect + hints ────────────────────────────────
+    if distro_choice in APT_DISTROS:
+        detected = _detect_codename()
+        existing_codename = targets.get("codename", "")
+
+        # Priority: existing manifest value → detected from OS → fallback "noble"
+        default_codename = existing_codename or detected or "noble"
+
+        hints: list[str] = []
+        if detected:
+            tag = "[dim](recommended — detected on this machine)[/dim]"
+            hints.append(f"  [cyan]{detected}[/cyan]  {tag}")
+        if existing_codename and existing_codename != detected:
+            hints.append(f"  [cyan]{existing_codename}[/cyan]  [dim](current in file)[/dim]")
+        if hints:
+            rprint("[dim]Codename hints:[/dim]")
+            for h in hints:
+                rprint(h)
+
         codename = questionary.text(
-            "Codename (e.g., noble, jammy, bookworm):", default="noble"
+            "Codename:",
+            default=default_codename,
         ).ask()
         plugin_type = "apt"
     else:
         codename = ""
         plugin_type = "dnf"
 
-    arch = questionary.select("Architecture:", choices=["amd64", "arm64"]).ask()
+    # Arch — pre-select existing value when updating
+    existing_arch = targets.get("arch", "amd64")
+    arch = questionary.select(
+        "Architecture:",
+        choices=["amd64", "arm64"],
+        default=existing_arch if existing_arch in ("amd64", "arm64") else "amd64",
+    ).ask()
 
-    tasks: list = []
+    # Carry forward existing tasks; new tasks appended in the loop below
+    tasks: list = list(existing.get("spec", {}).get("tasks", []))
 
+    # ── Task loop ─────────────────────────────────────────────────────────
     while True:
         rprint("\n[bold]Add a task[/bold]")
         action = questionary.select(
@@ -126,7 +238,6 @@ def create_cmd() -> None:
             rprint(f"[green]Task added:[/] {task_name}")
             continue
 
-        # --- Search catalog ---
         choices = get_package_choices(catalog)
         if not choices:
             rprint("[red]Catalog is empty.[/red]")
@@ -137,18 +248,16 @@ def create_cmd() -> None:
             choices=choices,
             use_indicator=True,
         ).ask()
-
         if not pkg_key:
             continue
 
         pkg_data = catalog[pkg_key]
         versions = pkg_data.get("versions", ["latest"])
-
         pkg_version = questionary.select("Version:", choices=versions).ask()
 
         _add_subtasks(pkg_data, plugin_type, pkg_version, codename, tasks)
 
-    # Build the final manifest
+    # ── Build and save manifest ───────────────────────────────────────────
     manifest = {
         "apiVersion": "syncit/v1",
         "kind": "Bundle",
@@ -168,17 +277,16 @@ def create_cmd() -> None:
         manifest["spec"]["targets"]["codename"] = codename
 
     rprint("\n")
-    save_path = questionary.text("Save to:", default="bundle.yaml").ask()
+    default_save = str(manifest_file) if manifest_file else "bundle.yaml"
+    save_path = questionary.text("Save to:", default=default_save).ask()
     if not save_path:
         raise typer.Exit()
 
     save_file = Path(save_path)
-    with open(save_file, "w") as f:
-        yaml.dump(manifest, f, sort_keys=False)
+    _dump_manifest(manifest, save_file)
+    rprint(f"[green]{'Updated' if is_update else 'Saved'} {save_file}[/green]")
 
-    rprint(f"[green]Saved {save_file}[/green]")
-
-    # Prompt to run
+    # ── Run now? ──────────────────────────────────────────────────────────
     run_choice = questionary.select(
         "Run now?",
         choices=[

@@ -9,7 +9,8 @@ LOCAL_CATALOG = Path(__file__).parent / "catalog.json"
 
 def get_catalog() -> dict[str, Any]:
     """
-    Fetch the catalog. Try remote GitHub first, fallback to local JSON.
+    Fetch the catalog. Try remote GitHub first (3 s timeout), fallback to local JSON.
+    Merge order: remote → local bundled copy.
     """
     try:
         req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "syncit"})
@@ -19,33 +20,32 @@ def get_catalog() -> dict[str, Any]:
     except (urllib.error.URLError, json.JSONDecodeError):
         pass
 
-    # Fallback to local
+    # Fallback to local bundled copy
     if LOCAL_CATALOG.exists():
         with open(LOCAL_CATALOG, "r", encoding="utf-8") as f:
             return json.load(f)
-            
+
     return {}
 
+
 def resolve_template(
-    template: dict[str, Any], 
-    version: str, 
-    codename: str = ""
+    template: dict[str, Any],
+    version: str,
+    codename: str = "",
 ) -> dict[str, Any]:
     """
-    Resolves variables like {version}, {major_minor}, {codename} in the template.
-    Returns a new dict (deep copy with replaced strings).
+    Recursively replace {version}, {major_minor}, {codename} inside a template dict.
+    Returns a new deep-copied dict with all placeholders resolved.
     """
-    # Calculate major_minor from version
-    # e.g., '1.35.5' -> '1.35'
-    parts = version.split('.')
+    parts = version.split(".")
     major_minor = f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else version
-    
+
     replacements = {
         "{version}": version,
         "{major_minor}": major_minor,
         "{codename}": codename,
     }
-    
+
     def _replace(obj: Any) -> Any:
         if isinstance(obj, str):
             res = obj
@@ -59,3 +59,23 @@ def resolve_template(
         return obj
 
     return _replace(template)
+
+
+def resolve_subtask(
+    subtask: dict[str, Any],
+    plugin_type: str,
+    version: str,
+    codename: str = "",
+) -> dict[str, Any] | None:
+    """
+    Resolve a single subtask definition to a concrete task dict.
+
+    Picks ``templates[plugin_type]`` first; falls back to ``templates["any"]``
+    for plugin-agnostic subtasks (OCI images, file downloads, etc.).
+    Returns None if no matching template exists for this plugin type.
+    """
+    templates = subtask.get("templates", {})
+    template = templates.get(plugin_type) or templates.get("any")
+    if not template:
+        return None
+    return resolve_template(template, version, codename)

@@ -3,85 +3,101 @@
     "description": "Kubernetes control plane (kubeadm, kubelet, kubectl)",
     "category": "infrastructure",
     "versions": ["1.35.5", "1.34.4", "1.33.6", "1.32.7"],
-    "templates": {
-      "apt": {
-        "name": "Install Kubernetes",
-        "plugin": "apt",
-        "repos": [
-          {
-            "name": "kubernetes",
-            "url": "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v{major_minor}/deb/ /",
-            "gpg_key": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/deb/Release.key"
+    "subtasks": {
+      "packages": {
+        "label": "Install binaries (kubeadm, kubelet, kubectl)",
+        "required": true,
+        "templates": {
+          "apt": {
+            "name": "Install Kubernetes",
+            "plugin": "apt",
+            "repos": [
+              {
+                "name": "kubernetes",
+                "url": "deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v{major_minor}/deb/ /",
+                "gpg_key": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/deb/Release.key"
+              }
+            ],
+            "packages": [
+              "kubeadm={version}-1.1",
+              "kubelet={version}-1.1",
+              "kubectl={version}-1.1"
+            ]
+          },
+          "dnf": {
+            "name": "Install Kubernetes",
+            "plugin": "dnf",
+            "repos": [
+              {
+                "name": "kubernetes",
+                "url": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/",
+                "gpg_key": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key",
+                "gpgcheck": true
+              }
+            ],
+            "packages": [
+              "kubeadm-{version}",
+              "kubelet-{version}",
+              "kubectl-{version}"
+            ]
           }
-        ],
-        "packages": [
-          "kubeadm={version}-1.1",
-          "kubelet={version}-1.1",
-          "kubectl={version}-1.1"
-        ]
+        }
       },
-      "dnf": {
-        "name": "Install Kubernetes",
-        "plugin": "dnf",
-        "repos": [
-          {
-            "name": "kubernetes",
-            "url": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/",
-            "gpg_key": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key",
-            "gpgcheck": true
+      "control-plane-images": {
+        "label": "Pull control plane OCI images (kube-apiserver, etcd, coredns...)",
+        "required": false,
+        "templates": {
+          "any": {
+            "name": "Pull Kubernetes Control Plane Images",
+            "plugin": "oci_image",
+            "images": [
+              "registry.k8s.io/kube-apiserver:v{version}",
+              "registry.k8s.io/kube-controller-manager:v{version}",
+              "registry.k8s.io/kube-scheduler:v{version}",
+              "registry.k8s.io/kube-proxy:v{version}",
+              "registry.k8s.io/etcd:3.5.17-0",
+              "registry.k8s.io/pause:3.10",
+              "registry.k8s.io/coredns/coredns:v1.12.0"
+            ]
           }
-        ],
-        "packages": [
-          "kubeadm-{version}",
-          "kubelet-{version}",
-          "kubectl-{version}"
-        ]
+        }
       }
-    },
-    "images": [
-      {
-        "name": "Pull Kubernetes Control Plane Images",
-        "plugin": "oci_image",
-        "images": [
-          "registry.k8s.io/kube-apiserver:v{version}",
-          "registry.k8s.io/kube-controller-manager:v{version}",
-          "registry.k8s.io/kube-scheduler:v{version}",
-          "registry.k8s.io/kube-proxy:v{version}",
-          "registry.k8s.io/etcd:3.5.17-0",
-          "registry.k8s.io/pause:3.10",
-          "registry.k8s.io/coredns/coredns:v1.12.0"
-        ]
-      }
-    ]
+    }
   },
   "cri-o": {
     "description": "CRI-O container runtime",
     "category": "runtime",
     "versions": ["1.35.5", "1.34.4", "1.33.6"],
-    "templates": {
-      "apt": {
-        "name": "Install CRI-O",
-        "plugin": "apt",
-        "repos": [
-          {
-            "name": "crio",
-            "url": "deb [signed-by=/etc/apt/keyrings/crio.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/deb/ /",
-            "gpg_key": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/deb/Release.key"
+    "subtasks": {
+      "packages": {
+        "label": "Install CRI-O runtime",
+        "required": true,
+        "templates": {
+          "apt": {
+            "name": "Install CRI-O",
+            "plugin": "apt",
+            "repos": [
+              {
+                "name": "crio",
+                "url": "deb [signed-by=/etc/apt/keyrings/crio.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/deb/ /",
+                "gpg_key": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/deb/Release.key"
+              }
+            ],
+            "packages": ["cri-o"]
+          },
+          "dnf": {
+            "name": "Install CRI-O",
+            "plugin": "dnf",
+            "repos": [
+              {
+                "name": "crio",
+                "url": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/",
+                "gpg_key": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key"
+              }
+            ],
+            "packages": ["cri-o"]
           }
-        ],
-        "packages": ["cri-o"]
-      },
-      "dnf": {
-        "name": "Install CRI-O",
-        "plugin": "dnf",
-        "repos": [
-          {
-            "name": "crio",
-            "url": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/",
-            "gpg_key": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key"
-          }
-        ],
-        "packages": ["cri-o"]
+        }
       }
     }
   },
@@ -89,34 +105,52 @@
     "description": "PostgreSQL database server",
     "category": "database",
     "versions": ["16", "15", "14", "13"],
-    "templates": {
-      "apt": {
-        "name": "Install PostgreSQL {version}",
-        "plugin": "apt",
-        "repos": [
-          {
-            "name": "pgdg",
-            "url": "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt {codename}-pgdg main",
-            "gpg_key": "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+    "subtasks": {
+      "packages": {
+        "label": "Install PostgreSQL server",
+        "required": true,
+        "templates": {
+          "apt": {
+            "name": "Install PostgreSQL {version}",
+            "plugin": "apt",
+            "repos": [
+              {
+                "name": "pgdg",
+                "url": "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt {codename}-pgdg main",
+                "gpg_key": "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+              }
+            ],
+            "packages": ["postgresql-{version}"]
+          },
+          "dnf": {
+            "name": "Install PostgreSQL {version}",
+            "plugin": "dnf",
+            "repos": [
+              {
+                "name": "pgdg",
+                "url": "https://download.postgresql.org/pub/repos/yum/{version}/redhat/rhel-$releasever-$basearch",
+                "gpg_key": "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
+              }
+            ],
+            "packages": ["postgresql{version}-server"]
           }
-        ],
-        "packages": [
-          "postgresql-{version}"
-        ]
+        }
       },
-      "dnf": {
-        "name": "Install PostgreSQL {version}",
-        "plugin": "dnf",
-        "repos": [
-          {
-            "name": "pgdg",
-            "url": "https://download.postgresql.org/pub/repos/yum/{version}/redhat/rhel-$releasever-$basearch",
-            "gpg_key": "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
+      "client-tools": {
+        "label": "Install client tools (psql CLI only)",
+        "required": false,
+        "templates": {
+          "apt": {
+            "name": "Install PostgreSQL Client {version}",
+            "plugin": "apt",
+            "packages": ["postgresql-client-{version}"]
+          },
+          "dnf": {
+            "name": "Install PostgreSQL Client {version}",
+            "plugin": "dnf",
+            "packages": ["postgresql{version}"]
           }
-        ],
-        "packages": [
-          "postgresql{version}-server"
-        ]
+        }
       }
     }
   },
@@ -124,16 +158,38 @@
     "description": "Podman daemonless container engine",
     "category": "runtime",
     "versions": ["latest"],
-    "templates": {
-      "apt": {
-        "name": "Install Podman",
-        "plugin": "apt",
-        "packages": ["podman"]
+    "subtasks": {
+      "packages": {
+        "label": "Install Podman engine",
+        "required": true,
+        "templates": {
+          "apt": {
+            "name": "Install Podman",
+            "plugin": "apt",
+            "packages": ["podman"]
+          },
+          "dnf": {
+            "name": "Install Podman",
+            "plugin": "dnf",
+            "packages": ["podman"]
+          }
+        }
       },
-      "dnf": {
-        "name": "Install Podman",
-        "plugin": "dnf",
-        "packages": ["podman"]
+      "rootless-support": {
+        "label": "Install rootless networking support (slirp4netns, uidmap)",
+        "required": false,
+        "templates": {
+          "apt": {
+            "name": "Install Podman Rootless Support",
+            "plugin": "apt",
+            "packages": ["slirp4netns", "uidmap"]
+          },
+          "dnf": {
+            "name": "Install Podman Rootless Support",
+            "plugin": "dnf",
+            "packages": ["slirp4netns", "shadow-utils"]
+          }
+        }
       }
     }
   }

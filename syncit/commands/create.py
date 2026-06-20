@@ -1,3 +1,5 @@
+import json
+import sys
 import typer
 import yaml
 import questionary
@@ -6,7 +8,12 @@ from typing import Optional
 from rich import print as rprint
 from rich.console import Console
 
-from syncit.registry import get_catalog, resolve_subtask
+from syncit.registry import (
+    get_catalog,
+    resolve_subtask,
+    save_to_user_catalog,
+    save_to_project_catalog,
+)
 from syncit.commands.pack import run_pack
 from syncit.commands.up import run_up
 
@@ -17,7 +24,7 @@ APT_DISTROS = {"Ubuntu", "Debian"}
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _detect_codename() -> str:
@@ -39,7 +46,6 @@ def _load_manifest(path: Path) -> dict:
 
 def _dump_manifest(manifest: dict, path: Path) -> None:
     """Write YAML with repo URLs always on a single line (no PyYAML line-folding)."""
-    import sys
 
     class _NoFoldDumper(yaml.Dumper):
         def __init__(self, stream, **kwargs):
@@ -58,16 +64,11 @@ def _dump_manifest(manifest: dict, path: Path) -> None:
         )
 
 
-
-
-
-
-
 def get_package_choices(catalog: dict) -> list[questionary.Choice]:
     choices = []
     for key, data in catalog.items():
         desc = data.get("description", "")
-        choices.append(questionary.Choice(title=f"{key:<15} ({desc})", value=key))
+        choices.append(questionary.Choice(title=f"{key:<18} ({desc})", value=key))
     return choices
 
 
@@ -122,6 +123,179 @@ def _add_subtasks(
 
 
 # ---------------------------------------------------------------------------
+# Custom task wizard
+# ---------------------------------------------------------------------------
+
+def _prompt_apt_dnf_task(task_name: str, plugin: str) -> dict:
+    """Prompt for apt/dnf task fields (repos + packages)."""
+    task: dict = {"name": task_name, "plugin": plugin}
+
+    if questionary.confirm("Add a custom upstream repo?", default=False).ask():
+        repo_name = questionary.text("Repo name (short key):").ask() or "custom"
+        if plugin == "apt":
+            repo_url = questionary.text(
+                "Full apt source line  (e.g. deb [...] https://... /):"
+            ).ask() or ""
+        else:
+            repo_url = questionary.text("Repo base URL:").ask() or ""
+
+        gpg_key = questionary.text("GPG key URL (blank to skip):").ask() or ""
+        repo: dict = {"name": repo_name, "url": repo_url}
+        if gpg_key:
+            repo["gpg_key"] = gpg_key
+        task["repos"] = [repo]
+
+    pkg_str = questionary.text("Packages (comma-separated):").ask() or ""
+    task["packages"] = [p.strip() for p in pkg_str.split(",") if p.strip()]
+    return task
+
+
+def _prompt_pip_task(task_name: str) -> dict:
+    task: dict = {"name": task_name, "plugin": "pip"}
+    req_file = questionary.text(
+        "requirements.txt path (blank to list packages inline):"
+    ).ask()
+    if req_file:
+        task["requirements"] = req_file
+    else:
+        pkg_str = questionary.text("Python packages (comma-separated):").ask() or ""
+        task["packages"] = [p.strip() for p in pkg_str.split(",") if p.strip()]
+    task["python_version"] = questionary.text("Python version:", default="3.11").ask()
+    return task
+
+
+def _prompt_oci_task(task_name: str) -> dict:
+    task: dict = {"name": task_name, "plugin": "oci_image"}
+    rprint("[dim]Enter image references one per line. Leave blank and press Enter to stop.[/dim]")
+    images = []
+    while True:
+        img = questionary.text("Image (blank to stop):").ask()
+        if not img:
+            break
+        images.append(img)
+    task["images"] = images
+    return task
+
+
+def _prompt_file_task(task_name: str) -> dict:
+    task: dict = {"name": task_name, "plugin": "file"}
+    files = []
+    rprint("[dim]Add files/archives one at a time. Leave URL blank to stop.[/dim]")
+    while True:
+        url = questionary.text("File URL (blank to stop):").ask()
+        if not url:
+            break
+        dest = questionary.text("Destination path:").ask() or "/tmp"
+        extract = questionary.confirm("Extract archive?", default=False).ask()
+        entry: dict = {"url": url, "dest": dest}
+        if extract:
+            entry["extract"] = True
+            strip = questionary.text("Strip components (0 = none):", default="0").ask()
+            entry["strip_components"] = int(strip or "0")
+        else:
+            entry["executable"] = questionary.confirm("Mark executable?", default=False).ask()
+        files.append(entry)
+    task["files"] = files
+    return task
+
+
+def _create_custom_task(default_plugin: str) -> dict | None:
+    """
+    Full interactive wizard to define a single custom task from scratch.
+    Returns the task dict, or None if the user cancelled.
+    """
+    rprint("\n[bold]Custom Task[/bold]")
+    task_name = questionary.text("Task name:").ask()
+    if not task_name:
+        return None
+
+    plugin = questionary.select(
+        "Plugin:",
+        choices=["apt", "dnf", "pip", "oci_image", "file"],
+        default=default_plugin,
+    ).ask()
+
+    if plugin in ("apt", "dnf"):
+        return _prompt_apt_dnf_task(task_name, plugin)
+    elif plugin == "pip":
+        return _prompt_pip_task(task_name)
+    elif plugin == "oci_image":
+        return _prompt_oci_task(task_name)
+    elif plugin == "file":
+        return _prompt_file_task(task_name)
+    return None
+
+
+def _build_catalog_entry(task: dict, plugin: str) -> dict:
+    """
+    Convert a custom task dict into a catalog entry (subtask model).
+    Plugin-neutral tasks (oci_image, file, pip) are stored under 'any'.
+    """
+    template_key = plugin if plugin in ("apt", "dnf") else "any"
+    template = {k: v for k, v in task.items()}
+
+    return {
+        "subtasks": {
+            "packages": {
+                "label": task.get("name", "Custom task"),
+                "required": True,
+                "templates": {
+                    template_key: template,
+                },
+            }
+        }
+    }
+
+
+def _save_custom_task_to_catalog(task: dict, plugin: str) -> None:
+    """Ask where to save the task and persist it to the chosen catalog file."""
+    rprint("\n[bold]Save to Catalog[/bold]")
+
+    entry_id = questionary.text(
+        "Catalog entry ID (short key, used in 'syncit create' search):"
+    ).ask()
+    if not entry_id:
+        rprint("[dim]Skipping catalog save.[/dim]")
+        return
+
+    description = questionary.text("Description:", default=task.get("name", "")).ask() or ""
+    category = questionary.select(
+        "Category:",
+        choices=["infrastructure", "runtime", "database", "custom"],
+        default="custom",
+    ).ask()
+    versions_str = questionary.text(
+        "Supported versions (comma-separated, or 'latest'):", default="latest"
+    ).ask() or "latest"
+    versions = [v.strip() for v in versions_str.split(",") if v.strip()]
+
+    entry = _build_catalog_entry(task, plugin)
+    entry["description"] = description
+    entry["category"] = category
+    entry["versions"] = versions
+
+    location = questionary.select(
+        "Save location:",
+        choices=[
+            questionary.Choice(
+                "User catalog  (~/.config/syncit/catalog.json)", "user"
+            ),
+            questionary.Choice(
+                "Project catalog  (./syncit-catalog.json)", "project"
+            ),
+        ],
+    ).ask()
+
+    if location == "user":
+        path = save_to_user_catalog(entry_id, entry)
+    else:
+        path = save_to_project_catalog(entry_id, entry)
+
+    rprint(f"[green]Saved '{entry_id}' to:[/] {path}")
+    rprint(f"[dim]Next run of 'syncit create' will show it in catalog search.[/dim]")
+
+
+# ---------------------------------------------------------------------------
 # Command
 # ---------------------------------------------------------------------------
 
@@ -129,7 +303,6 @@ def create_cmd(
     manifest_file: Optional[Path] = typer.Argument(
         None,
         help="Path to an existing bundle.yaml to update. Omit to create a new one.",
-        exists=False,   # allow non-existing path for new files
         file_okay=True,
         dir_okay=False,
     ),
@@ -153,7 +326,7 @@ def create_cmd(
                 rprint(f"  [dim]· {t.get('name', '?')} ({t.get('plugin', '?')})[/dim]")
         rprint()
 
-    # ── Metadata prompts (pre-filled from existing file in update mode) ───
+    # ── Metadata prompts ──────────────────────────────────────────────────
     rprint("\n[bold]Bundle Metadata[/bold]")
     meta = existing.get("metadata", {})
     targets = existing.get("spec", {}).get("targets", {})
@@ -166,7 +339,6 @@ def create_cmd(
 
     version = questionary.text("Version:", default=meta.get("version", "1.0.0")).ask()
 
-    # Distro — pre-select existing value when updating
     existing_distro_raw = targets.get("distro", "")
     existing_distro = existing_distro_raw.capitalize() if existing_distro_raw else ""
     default_distro = existing_distro if existing_distro in DISTRO_CHOICES else "Ubuntu"
@@ -180,31 +352,28 @@ def create_cmd(
     if distro_choice in APT_DISTROS:
         detected = _detect_codename()
         existing_codename = targets.get("codename", "")
-
-        # Priority: existing manifest value → detected from OS → fallback "noble"
         default_codename = existing_codename or detected or "noble"
 
         hints: list[str] = []
         if detected:
-            tag = "[dim](recommended — detected on this machine)[/dim]"
-            hints.append(f"  [cyan]{detected}[/cyan]  {tag}")
+            hints.append(
+                f"  [cyan]{detected}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
+            )
         if existing_codename and existing_codename != detected:
-            hints.append(f"  [cyan]{existing_codename}[/cyan]  [dim](current in file)[/dim]")
+            hints.append(
+                f"  [cyan]{existing_codename}[/cyan]  [dim](current in file)[/dim]"
+            )
         if hints:
             rprint("[dim]Codename hints:[/dim]")
             for h in hints:
                 rprint(h)
 
-        codename = questionary.text(
-            "Codename:",
-            default=default_codename,
-        ).ask()
+        codename = questionary.text("Codename:", default=default_codename).ask()
         plugin_type = "apt"
     else:
         codename = ""
         plugin_type = "dnf"
 
-    # Arch — pre-select existing value when updating
     existing_arch = targets.get("arch", "amd64")
     arch = questionary.select(
         "Architecture:",
@@ -220,42 +389,53 @@ def create_cmd(
         rprint("\n[bold]Add a task[/bold]")
         action = questionary.select(
             "What next?",
-            choices=["Search catalog", "Add empty task", "Done"],
+            choices=["Search catalog", "Create custom task", "Add empty task", "Done"],
         ).ask()
 
         if action == "Done":
             break
 
-        if action == "Add empty task":
+        elif action == "Add empty task":
             task_name = questionary.text("Task name:").ask()
-            tasks.append(
-                {
-                    "name": task_name,
-                    "plugin": plugin_type,
-                    "packages": ["<package_name>"],
-                }
-            )
-            rprint(f"[green]Task added:[/] {task_name}")
-            continue
+            if task_name:
+                tasks.append(
+                    {
+                        "name": task_name,
+                        "plugin": plugin_type,
+                        "packages": ["<package_name>"],
+                    }
+                )
+                rprint(f"[green]Task added:[/] {task_name}")
 
-        choices = get_package_choices(catalog)
-        if not choices:
-            rprint("[red]Catalog is empty.[/red]")
-            continue
+        elif action == "Create custom task":
+            task = _create_custom_task(default_plugin=plugin_type)
+            if task:
+                tasks.append(task)
+                rprint(f"[green]Task added:[/] {task['name']}")
+                if questionary.confirm(
+                    "Save to catalog for future reuse?", default=False
+                ).ask():
+                    _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
 
-        pkg_key = questionary.select(
-            "Select package:",
-            choices=choices,
-            use_indicator=True,
-        ).ask()
-        if not pkg_key:
-            continue
+        else:  # Search catalog
+            choices = get_package_choices(catalog)
+            if not choices:
+                rprint("[red]Catalog is empty.[/red]")
+                continue
 
-        pkg_data = catalog[pkg_key]
-        versions = pkg_data.get("versions", ["latest"])
-        pkg_version = questionary.select("Version:", choices=versions).ask()
+            pkg_key = questionary.select(
+                "Select package:",
+                choices=choices,
+                use_indicator=True,
+            ).ask()
+            if not pkg_key:
+                continue
 
-        _add_subtasks(pkg_data, plugin_type, pkg_version, codename, tasks)
+            pkg_data = catalog[pkg_key]
+            versions = pkg_data.get("versions", ["latest"])
+            pkg_version = questionary.select("Version:", choices=versions).ask()
+
+            _add_subtasks(pkg_data, plugin_type, pkg_version, codename, tasks)
 
     # ── Build and save manifest ───────────────────────────────────────────
     manifest = {

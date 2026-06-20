@@ -7,38 +7,76 @@ from typing import Any
 CATALOG_URL = "https://raw.githubusercontent.com/rahul007-bit/syncit/main/syncit/registry/catalog.json"
 LOCAL_CATALOG = Path(__file__).parent / "catalog.json"
 
+USER_CATALOG = Path.home() / ".config" / "syncit" / "catalog.json"
+PROJECT_CATALOG = Path("syncit-catalog.json")
+
+
 def _uses_subtask_schema(catalog: dict) -> bool:
     """Return True if the catalog uses the current subtask-based schema."""
     return any("subtasks" in entry for entry in catalog.values())
 
 
+def _load_json(path: Path) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def get_catalog() -> dict[str, Any]:
     """
-    Fetch the catalog.
+    Return the merged catalog.
 
-    Always loads the local bundled copy as the baseline. Then attempts to
-    fetch the remote version from GitHub; if the remote uses the current
-    subtask schema it is returned instead. This prevents a stale or
-    incompatible remote from overriding a newer local copy.
+    Priority (highest wins):
+      project catalog  (./syncit-catalog.json)
+      > user catalog   (~/.config/syncit/catalog.json)
+      > remote catalog (GitHub raw, 3 s timeout, only if subtask schema matches)
+      > bundled local  (syncit/registry/catalog.json)
     """
-    # Load local bundled copy as the guaranteed fallback
-    local_catalog: dict = {}
-    if LOCAL_CATALOG.exists():
-        with open(LOCAL_CATALOG, "r", encoding="utf-8") as f:
-            local_catalog = json.load(f)
+    # Baseline: bundled local copy
+    catalog: dict = _load_json(LOCAL_CATALOG)
 
-    # Try remote — only use it if it speaks the current schema
+    # Try remote — only replace if schema-compatible
     try:
         req = urllib.request.Request(CATALOG_URL, headers={"User-Agent": "syncit"})
         with urllib.request.urlopen(req, timeout=3) as response:
             if response.status == 200:
                 remote = json.loads(response.read().decode("utf-8"))
                 if _uses_subtask_schema(remote):
-                    return remote
+                    catalog = remote
     except (urllib.error.URLError, json.JSONDecodeError):
         pass
 
-    return local_catalog
+    # Merge user catalog (~/.config/syncit/catalog.json)
+    user = _load_json(USER_CATALOG)
+    if user:
+        catalog = {**catalog, **user}
+
+    # Merge project catalog (./syncit-catalog.json) — highest priority
+    project = _load_json(PROJECT_CATALOG)
+    if project:
+        catalog = {**catalog, **project}
+
+    return catalog
+
+
+def save_to_user_catalog(entry_id: str, entry: dict[str, Any]) -> Path:
+    """Persist a new entry into the user-level catalog file."""
+    USER_CATALOG.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_json(USER_CATALOG)
+    existing[entry_id] = entry
+    USER_CATALOG.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
+    return USER_CATALOG
+
+
+def save_to_project_catalog(entry_id: str, entry: dict[str, Any]) -> Path:
+    """Persist a new entry into the project-level catalog file."""
+    existing = _load_json(PROJECT_CATALOG)
+    existing[entry_id] = entry
+    PROJECT_CATALOG.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
+    return PROJECT_CATALOG
+
 
 
 def resolve_template(

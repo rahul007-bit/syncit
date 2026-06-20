@@ -78,34 +78,31 @@ def _print_catalog_table(catalog: dict) -> None:
 
 def _catalog_search_prompt(catalog: dict) -> str | None:
     """
-    Show a table of all entries, then an autocomplete prompt to filter by
-    keyword.  Returns the catalog key selected, or None if cancelled.
+    Scrollable + searchable catalog picker.
+    Arrow keys to navigate, type to filter — Enter to confirm, Esc/Ctrl-C to cancel.
+    Returns the catalog key selected, or None if cancelled.
     """
     if not catalog:
         return None
 
-    # Always print the full list first so the user can see what's available.
-    _print_catalog_table(catalog)
-
-    # Map display label → catalog key so we can look up after selection.
-    choice_map: dict[str, str] = {}
+    choices = []
     for key, data in catalog.items():
         desc = data.get("description", "")
         category = data.get("category", "")
-        label = f"{key:<18} [{category}]  {desc}"
-        choice_map[label] = key
+        choices.append(
+            questionary.Choice(
+                title=f"{key:<18} [{category}]  {desc}",
+                value=key,
+            )
+        )
 
-    labels = list(choice_map.keys())
-
-    selected = questionary.autocomplete(
-        "Search (type to filter, Enter to confirm):",
-        choices=labels,
-        match_middle=True,
-        ignore_case=True,
-        validate=lambda x: x in choice_map or not x,
+    return questionary.select(
+        "Select package (↑↓ arrows, type to filter):",
+        choices=choices,
+        use_search_filter=True,
+        use_indicator=True,
     ).ask()
 
-    return choice_map.get(selected) if selected else None
 
 
 

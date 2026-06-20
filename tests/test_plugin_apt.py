@@ -77,76 +77,61 @@ class TestAptPack:
     def test_pack_invokes_correct_commands(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "Package: git\n"
+        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
         mock_result.stderr = ""
 
         with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result) as mock_run:
             plugin.pack({"packages": ["git"]}, pack_ctx)
 
-        # apt-cache depends should be called
         calls = [c.args[0] for c in mock_run.call_args_list]
-        assert any("apt-cache" in str(c) for c in calls)
+        # apt-get install --print-uris should be called
+        assert any("install" in str(c) and "--print-uris" in str(c) for c in calls)
         # apt-get download should be called
-        assert any("apt-get" in str(c) for c in calls)
+        assert any("download" in str(c) for c in calls)
         # dpkg-scanpackages should be called
         assert any("dpkg-scanpackages" in str(c) for c in calls)
 
     def test_pack_creates_packages_file(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "Package: git\n"
+        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
         mock_result.stderr = ""
 
         with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result):
             plugin.pack({"packages": ["git"]}, pack_ctx)
 
-        assert (pack_ctx.bundle_dir / "apt" / "debs" / "Packages").exists()
+        assert (pack_ctx.bundle_dir / "default" / "Packages").exists()
 
     def test_pack_creates_sources_list(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = ""
+        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
         mock_result.stderr = ""
 
         with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result):
             plugin.pack({"packages": ["git"]}, pack_ctx)
 
-        sources = (pack_ctx.bundle_dir / "apt" / "sources.list").read_text()
+        sources = (pack_ctx.bundle_dir / "default" / "sources.list").read_text()
         assert "file://" in sources
         assert "trusted=yes" in sources
 
-    def test_pack_filters_virtual_packages(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
+    def test_pack_uses_base_installroot(self, plugin: AptPlugin, pack_ctx: PackContext, tmp_path: Path) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = """
-  Depends: libc6
-  Depends: debconf-2.0>
-  Depends: perl:any>
-  Depends: <virtual-pkg>
- |Depends: some-or-pkg
-  Depends: real-pkg (> 1.0)
-"""
+        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
         mock_result.stderr = ""
 
-        with patch("syncit.plugins.apt.subprocess.run") as mock_run:
+        installroot = tmp_path / "root"
+        status_file = installroot / "var" / "lib" / "dpkg" / "status"
+        status_file.parent.mkdir(parents=True)
+        status_file.touch()
 
-            def side_effect(cmd, **kwargs):
-                if cmd[0] == "apt-cache":
-                    return mock_result
-                return MagicMock(returncode=0, stdout="", stderr="")
+        with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result) as mock_run:
+            plugin.pack({"packages": ["git"], "base_installroot": str(installroot)}, pack_ctx)
 
-            mock_run.side_effect = side_effect
-
-            plugin.pack({"packages": ["custom"]}, pack_ctx)
-
-        # Expected downloads: custom, libc6, real-pkg
-        downloads = []
-        for call in mock_run.call_args_list:
-            args = call.args[0]
-            if args[0] == "apt-get" and args[1] == "download":
-                downloads.append(args[2])
-
-        assert set(downloads) == {"custom", "libc6"}
+        calls = [c.args[0] for c in mock_run.call_args_list]
+        install_call = [c for c in calls if "install" in str(c) and "--print-uris" in str(c)][0]
+        assert f"Dir::State::status={status_file}" in str(install_call)
 
 
 # --------------------------------------------------------------------------- #
@@ -157,9 +142,8 @@ class TestAptPack:
 class TestAptApply:
     def _setup_bundle(self, bundle_dir: Path) -> None:
         """Create minimal apt bundle artifacts."""
-        apt_dir = bundle_dir / "apt"
-        debs_dir = apt_dir / "debs"
-        debs_dir.mkdir(parents=True)
+        apt_dir = bundle_dir / "default"
+        apt_dir.mkdir(parents=True)
         (apt_dir / "Packages").write_text("Package: git\nVersion: 1:2.43\n")
 
     def test_dry_run_returns_success(self, plugin: AptPlugin, apply_ctx: ApplyContext) -> None:

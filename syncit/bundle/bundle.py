@@ -40,14 +40,14 @@ def read_meta(bundle_dir: Path) -> BundleMetadata:
         return BundleMetadata(**json.load(f))
 
 
-def compute_task_checksum(bundle_dir: Path, plugin_name: str) -> str:
-    """Compute a SHA-256 checksum of all files in the plugin's artifact directory."""
-    plugin_dir = bundle_dir / plugin_name
-    if not plugin_dir.exists():
+def compute_task_checksum(bundle_dir: Path, task_slug: str) -> str:
+    """Compute a SHA-256 checksum of all files in the task's artifact directory."""
+    task_dir = bundle_dir / task_slug
+    if not task_dir.exists():
         return "sha256:"
 
     sha = hashlib.sha256()
-    for file in sorted(plugin_dir.rglob("*")):
+    for file in sorted(task_dir.rglob("*")):
         if file.is_file():
             sha.update(str(file.relative_to(bundle_dir)).encode())
             sha.update(file.read_bytes())

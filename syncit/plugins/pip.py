@@ -66,8 +66,8 @@ class PipPlugin(OfflinePlugin):
                 errors=["Only requirements.txt is supported in Phase 1"],
             )
 
-        python_version = task_spec.get("python_version", "3.11")
-        wheel_dir = ctx.bundle_dir / "pip" / "wheels"
+        slug = ctx.task_slug or "default"
+        wheel_dir = ctx.bundle_dir / slug
 
         if ctx.dry_run:
             return PluginResult(
@@ -151,7 +151,7 @@ class PipPlugin(OfflinePlugin):
                 )
 
         # Copy requirements file into bundle
-        bundle_req = ctx.bundle_dir / "pip" / "requirements.txt"
+        bundle_req = ctx.bundle_dir / slug / "requirements.txt"
         shutil.copy2(str(req_path), str(bundle_req))
 
         artifacts = [str(wheel_dir), str(bundle_req)]
@@ -167,8 +167,9 @@ class PipPlugin(OfflinePlugin):
         )
 
     def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
-        wheel_dir = ctx.bundle_dir / "pip" / "wheels"
-        req_file = ctx.bundle_dir / "pip" / "requirements.txt"
+        slug = ctx.task_slug or "default"
+        wheel_dir = ctx.bundle_dir / slug
+        req_file = ctx.bundle_dir / slug / "requirements.txt"
 
         if not wheel_dir.exists() or not req_file.exists():
             return PluginResult(
@@ -178,8 +179,8 @@ class PipPlugin(OfflinePlugin):
                 errors=["Missing pip artifacts in bundle"],
             )
 
-        target_wheel_dir = Path("/srv/offline/pip/wheels")
-        target_req_file = Path("/srv/offline/pip/requirements.txt")
+        target_wheel_dir = Path("/srv/offline/pip") / slug
+        target_req_file = Path("/srv/offline/pip") / slug / "requirements.txt"
 
         if ctx.dry_run:
             return PluginResult(
@@ -291,11 +292,11 @@ class PipPlugin(OfflinePlugin):
 echo "[pip] Installing wheels..."
 # Check Python version compatibility
 PYTHON_VERSION=$(python3 -c 'import sys; print(f"{{sys.version_info.major}}{{sys.version_info.minor}}")')
-if ! ls "$BUNDLE_DIR/{bundle_subdir}/wheels"/*"cp${{PYTHON_VERSION}}"* >/dev/null 2>&1 && ! ls "$BUNDLE_DIR/{bundle_subdir}/wheels"/*"py3-none-any"* >/dev/null 2>&1; then
+if ! ls "$BUNDLE_DIR/{bundle_subdir}"/*"cp${{PYTHON_VERSION}}"* >/dev/null 2>&1 && ! ls "$BUNDLE_DIR/{bundle_subdir}"/*"py3-none-any"* >/dev/null 2>&1; then
     echo "[pip] WARNING: No wheels found matching Python version ${{PYTHON_VERSION}}. Installation might fail if native extensions are required."
 fi
 
-pip3 install --no-index --find-links "$BUNDLE_DIR/{bundle_subdir}/wheels" -r "$BUNDLE_DIR/{bundle_subdir}/requirements.txt"
+pip3 install --no-index --find-links "$BUNDLE_DIR/{bundle_subdir}" -r "$BUNDLE_DIR/{bundle_subdir}/requirements.txt"
 """
 
 

@@ -50,7 +50,8 @@ class CargoPlugin(OfflinePlugin):
                 errors.append(f"[cargo] {proj_name}: Cargo.toml not found in {proj_dir}")
                 continue
 
-            target_dir = ctx.bundle_dir / "cargo" / proj_name
+            slug = ctx.task_slug or "default"
+            target_dir = ctx.bundle_dir / slug / proj_name
             target_dir.mkdir(parents=True, exist_ok=True)
             vendor_dir = target_dir / "vendor"
 
@@ -74,8 +75,8 @@ class CargoPlugin(OfflinePlugin):
             config_snippet = target_dir / "config.toml.snippet"
             config_snippet.write_text(res.stdout)
 
-            artifacts.append(f"cargo/{proj_name}/vendor")
-            artifacts.append(f"cargo/{proj_name}/config.toml.snippet")
+            artifacts.append(f"{slug}/{proj_name}/vendor")
+            artifacts.append(f"{slug}/{proj_name}/config.toml.snippet")
 
         return PluginResult(
             success=len(errors) == 0,
@@ -95,8 +96,9 @@ class CargoPlugin(OfflinePlugin):
             proj_name = task["project_name"]
             proj_dir = Path(task["project_dir"]).expanduser().resolve()
 
-            bundled_vendor = ctx.bundle_dir / "cargo" / proj_name / "vendor"
-            bundled_snippet = ctx.bundle_dir / "cargo" / proj_name / "config.toml.snippet"
+            slug = ctx.task_slug or "default"
+            bundled_vendor = ctx.bundle_dir / slug / proj_name / "vendor"
+            bundled_snippet = ctx.bundle_dir / slug / proj_name / "config.toml.snippet"
 
             if not bundled_vendor.exists():
                 errors.append(f"[cargo] {proj_name}: vendor fallback missing in bundle")
@@ -172,7 +174,7 @@ directory = "vendor"
             lines.append(
                 f"cat $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/config.toml.snippet >> {shlex.quote(proj_dir)}/.cargo/config.toml"
             )
-        return "\\n".join(lines) + "\\n"
+        return "\n".join(lines) + "\n"
 
 
 registry.register(CargoPlugin())

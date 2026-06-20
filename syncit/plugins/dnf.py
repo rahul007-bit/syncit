@@ -99,8 +99,8 @@ class DnfPlugin(OfflinePlugin):
         artifacts: list[str] = []
 
         slug = ctx.task_slug or "default"
-        dnf_dir = ctx.bundle_dir / "dnf" / slug
-        rpm_dir = dnf_dir / "rpms"
+        dnf_dir = ctx.bundle_dir / slug
+        rpm_dir = dnf_dir
         keys_dir = dnf_dir / "keys"
         rpm_dir.mkdir(parents=True, exist_ok=True)
 
@@ -277,11 +277,11 @@ class DnfPlugin(OfflinePlugin):
         artifacts: list[str] = []
 
         slug = ctx.task_slug or "default"
-        bundled_rpms = ctx.bundle_dir / "dnf" / slug / "rpms"
+        bundled_rpms = ctx.bundle_dir / slug
         if not bundled_rpms.exists():
             return PluginResult(False, "No bundled RPMs found", [], ["[dnf] rpms missing"])
 
-        dest_rpm = Path("/srv/offline/dnf") / slug / "rpms"
+        dest_rpm = Path("/srv/offline/dnf") / slug
         repo_path = Path("/etc/yum.repos.d") / f"syncit-{slug}.repo"
 
         try:
@@ -300,7 +300,7 @@ class DnfPlugin(OfflinePlugin):
             repo_content = (
                 f"[syncit-{slug}]\n"
                 f"name=Syncit Offline Bundle ({slug})\n"
-                f"baseurl=file:///srv/offline/dnf/{slug}/rpms\n"
+                f"baseurl=file:///srv/offline/dnf/{slug}\n"
                 "enabled=1\n"
                 "gpgcheck=0\n"
             )
@@ -366,13 +366,13 @@ class DnfPlugin(OfflinePlugin):
         slug = bundle_subdir.split("/", 1)[-1] if "/" in bundle_subdir else bundle_subdir
         return f"""
 echo "[dnf] Configuring local repository ({bundle_subdir})..."
-mkdir -p /srv/offline/dnf/{slug}/rpms
-cp -r "$BUNDLE_DIR/{bundle_subdir}/rpms/"* /srv/offline/dnf/{slug}/rpms/
-createrepo_c /srv/offline/dnf/{slug}/rpms
+mkdir -p /srv/offline/dnf/{slug}
+cp -r "$BUNDLE_DIR/{bundle_subdir}"/* /srv/offline/dnf/{slug}/
+createrepo_c /srv/offline/dnf/{slug}
 cat > /etc/yum.repos.d/syncit-{slug}.repo << 'EOF'
 [syncit-{slug}]
 name=Syncit Local Repo ({slug})
-baseurl=file:///srv/offline/dnf/{slug}/rpms
+baseurl=file:///srv/offline/dnf/{slug}
 enabled=1
 gpgcheck=0
 EOF

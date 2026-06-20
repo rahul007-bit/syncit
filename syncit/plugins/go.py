@@ -41,7 +41,8 @@ class GoPlugin(OfflinePlugin):
         errors = []
         artifacts: list[str] = []
 
-        target_cache = ctx.bundle_dir / "go" / "modcache"
+        slug = ctx.task_slug or "default"
+        target_cache = ctx.bundle_dir / slug / "modcache"
         target_cache.mkdir(parents=True, exist_ok=True)
 
         if ctx.no_cache:
@@ -75,7 +76,7 @@ class GoPlugin(OfflinePlugin):
                 continue
 
         if target_cache.exists() and any(target_cache.iterdir()):
-            artifacts.append("go/modcache")
+            artifacts.append(f"{slug}/modcache")
 
         return PluginResult(
             success=len(errors) == 0,
@@ -90,7 +91,8 @@ class GoPlugin(OfflinePlugin):
         errors = []
         artifacts: list[str] = []
 
-        modcache_src = ctx.bundle_dir / "go" / "modcache"
+        slug = ctx.task_slug or "default"
+        modcache_src = ctx.bundle_dir / slug / "modcache"
         projects = task_spec.get("projects", [])
         if not modcache_src.exists():
             if projects:

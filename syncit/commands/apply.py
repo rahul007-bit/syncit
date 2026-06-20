@@ -111,7 +111,7 @@ def run_apply(
         for task in tasks:
             plugin = registry.get(task.plugin)
             if hasattr(plugin, "render_apply_sh"):
-                bundle_subdir = f"{task.plugin}/{_task_slug(task.name)}"
+                bundle_subdir = _task_slug(task.name)
                 snippet = plugin.render_apply_sh(task.config, bundle_subdir)
                 if snippet:
                     script_lines.append(snippet)
@@ -188,7 +188,7 @@ def run_apply(
                     continue
 
                 # Step C: Diff check — skip if unchanged & successful
-                task_checksum = compute_task_checksum(actual_bundle_dir, task.plugin)
+                task_checksum = compute_task_checksum(actual_bundle_dir, _task_slug(task.name))
                 prev_state = remote_state.applied_tasks.get(task.name)
                 if (
                     prev_state
@@ -199,7 +199,7 @@ def run_apply(
                     continue
 
                 # Step D: Stream the task execution via bash -s
-                bundle_subdir = f"{task.plugin}/{_task_slug(task.name)}"
+                bundle_subdir = _task_slug(task.name)
                 snippet = plugin.render_apply_sh(task.config, bundle_subdir)
                 full_script = (
                     f"#!/usr/bin/env bash\n"

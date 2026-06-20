@@ -121,7 +121,7 @@ class OciImagePlugin(OfflinePlugin):
     def pack(self, task_spec: dict[str, Any], ctx: PackContext) -> PluginResult:
         images: list[dict[str, str]] = task_spec.get("images", [])
         slug = ctx.task_slug or "default"
-        image_dir = ctx.bundle_dir / self.name / slug / "images"
+        image_dir = ctx.bundle_dir / slug
 
         if ctx.dry_run:
             sources = [img["source"] for img in images]
@@ -236,7 +236,7 @@ class OciImagePlugin(OfflinePlugin):
 
     def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
         slug = ctx.task_slug or "default"
-        image_dir = ctx.bundle_dir / self.name / slug / "images"
+        image_dir = ctx.bundle_dir / slug
         manifest_file = image_dir / "manifest.json"
 
         if not manifest_file.exists():
@@ -426,7 +426,7 @@ class OciImagePlugin(OfflinePlugin):
         for img in images:
             source = _normalize_ref(img["source"])
             safe = _safe_name(source)
-            tar = f"$BUNDLE_DIR/{bundle_subdir}/images/{safe}.tar"
+            tar = f"$BUNDLE_DIR/{bundle_subdir}/{safe}.tar"
             load_lines.append(
                 f'  if command -v skopeo &>/dev/null; then\n'
                 f'    echo "  [oci_image] → skopeo copy {source}"\n'

@@ -97,8 +97,8 @@ class AptPlugin(OfflinePlugin):
         packages: list[str] = task_spec.get("packages", [])
         repos: list[dict[str, Any]] = task_spec.get("repos", [])
         slug = ctx.task_slug or "default"
-        apt_dir = ctx.bundle_dir / "apt" / slug
-        deb_dir = apt_dir / "debs"
+        apt_dir = ctx.bundle_dir / slug
+        deb_dir = apt_dir
         keys_dir = apt_dir / "keys"
         deb_dir.mkdir(parents=True, exist_ok=True)
 
@@ -361,7 +361,7 @@ class AptPlugin(OfflinePlugin):
             # ── Phase 4: Write sources.list fragment (for local apply) ────
             if ctx.verbose:
                 rprint("[cyan]→[/] Writing sources.list...")
-            sources_file.write_text("deb [trusted=yes] file://./debs ./\n")
+            sources_file.write_text("deb [trusted=yes] file://./ ./\n")
 
             # ── Phase 5: Record target codename ──────────────────────────
             codename_file.write_text(_detect_codename())
@@ -377,7 +377,7 @@ class AptPlugin(OfflinePlugin):
                     if repo.get("gpg_key"):
                         repo_entry["gpg_key"] = {
                             "url": repo["gpg_key"],
-                            "bundle_path": f"apt/keys/{repo['name']}.gpg",
+                            "bundle_path": f"{slug}/keys/{repo['name']}.gpg",
                         }
                     meta.append(repo_entry)
                 (apt_dir / "repos.json").write_text(json.dumps(meta, indent=2))
@@ -399,8 +399,8 @@ class AptPlugin(OfflinePlugin):
 
     def apply(self, task_spec: dict[str, Any], ctx: ApplyContext) -> PluginResult:
         slug = ctx.task_slug or "default"
-        bundle_apt = ctx.bundle_dir / "apt" / slug
-        deb_dir = bundle_apt / "debs"
+        bundle_apt = ctx.bundle_dir / slug
+        deb_dir = bundle_apt
         packages_file = bundle_apt / "Packages"
 
         if not deb_dir.exists() or not packages_file.exists():
@@ -436,20 +436,13 @@ class AptPlugin(OfflinePlugin):
                 errors=[],
             )
 
-        # 1. Copy debs to target
-        target_debs = target_dir / "debs"
-        target_debs.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(str(deb_dir), str(target_debs), dirs_exist_ok=True)
-
-        # 2. Regenerate Packages index on target
-        idx_cmd = ["dpkg-scanpackages", "debs", "/dev/null"]
-        idx_res = _run(idx_cmd, cwd=str(target_dir))
-        (target_dir / "Packages").write_text(idx_res.stdout)
+        # 1. Copy bundle_apt to target
+        shutil.copytree(str(bundle_apt), str(target_dir), dirs_exist_ok=True)
 
         # 3. Write sources.list.d entry
         sources_dir = Path("/etc/apt/sources.list.d")
         sources_dir.mkdir(parents=True, exist_ok=True)
-        (sources_dir / "offline.list").write_text("deb [trusted=yes] file:///srv/offline/apt ./\n")
+        (sources_dir / f"offline-{slug}.list").write_text(f"deb [trusted=yes] file://{target_dir} ./\n")
 
         # 4. Update apt cache
         upd = _run(["apt-get", "update"])
@@ -536,7 +529,7 @@ class AptPlugin(OfflinePlugin):
         return f"""
 echo "[apt] Configuring isolated local repository ({bundle_subdir})..."
 SOURCES_FILE="$BUNDLE_DIR/{bundle_subdir}/syncit.list"
-echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir}/debs ./" > "$SOURCES_FILE"
+echo "deb [trusted=yes] file://$BUNDLE_DIR/{bundle_subdir} ./" > "$SOURCES_FILE"
 
 echo "[apt] Updating package index (local only)..."
 sudo apt-get update \\

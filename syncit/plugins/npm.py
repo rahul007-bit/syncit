@@ -64,8 +64,9 @@ class NpmPlugin(OfflinePlugin):
                 errors.append(f"[npm] {proj_name}: npm ci failed.\n{res.stderr}")
                 continue
 
-            # Target bundle struct: bundle_dir/npm/<project_name>/
-            target_dir = ctx.bundle_dir / "npm" / proj_name
+            # Target bundle struct: bundle_dir/<slug>/<project_name>/
+            slug = ctx.task_slug or "default"
+            target_dir = ctx.bundle_dir / slug / proj_name
             target_dir.mkdir(parents=True, exist_ok=True)
 
             nm_src = proj_dir / "node_modules"
@@ -73,10 +74,10 @@ class NpmPlugin(OfflinePlugin):
 
             if nm_src.exists():
                 shutil.copytree(nm_src, target_dir / "node_modules", dirs_exist_ok=True)
-                artifacts.append(f"npm/{proj_name}/node_modules")
+                artifacts.append(f"{slug}/{proj_name}/node_modules")
             if lock_src.exists():
                 shutil.copy2(lock_src, target_dir / "package-lock.json")
-                artifacts.append(f"npm/{proj_name}/package-lock.json")
+                artifacts.append(f"{slug}/{proj_name}/package-lock.json")
 
         return PluginResult(
             success=len(errors) == 0,
@@ -96,7 +97,8 @@ class NpmPlugin(OfflinePlugin):
             proj_name = task["project_name"]
             proj_dir = Path(task["project_dir"]).expanduser().resolve()
 
-            bundled_nm = ctx.bundle_dir / "npm" / proj_name / "node_modules"
+            slug = ctx.task_slug or "default"
+            bundled_nm = ctx.bundle_dir / slug / proj_name / "node_modules"
             if not bundled_nm.exists():
                 # We skip missing, just log an error
                 errors.append(f"[npm] {proj_name}: node_modules not found in bundle '{bundled_nm}'")
@@ -166,7 +168,7 @@ class NpmPlugin(OfflinePlugin):
             lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/node_modules {shlex.quote(proj_dir)}/")
             lines.append(f"echo 'offline=true' >> {shlex.quote(proj_dir)}/.npmrc")
             lines.append(f"echo 'prefer-offline=true' >> {shlex.quote(proj_dir)}/.npmrc")
-        return "\\n".join(lines) + "\\n"
+        return "\n".join(lines) + "\n"
 
 
 registry.register(NpmPlugin())

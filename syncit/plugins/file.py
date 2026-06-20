@@ -47,7 +47,8 @@ class FilePlugin(OfflinePlugin):
 
         errors = []
         artifacts: list[str] = []
-        file_dir = ctx.bundle_dir / "file"
+        slug = ctx.task_slug or "default"
+        file_dir = ctx.bundle_dir / slug
         file_dir.mkdir(parents=True, exist_ok=True)
 
         for f in files:
@@ -73,7 +74,7 @@ class FilePlugin(OfflinePlugin):
                     urllib.request.urlretrieve(url, cache_path)
 
                 shutil.copy2(cache_path, target_path)
-                artifacts.append(f"file/{filename}")
+                artifacts.append(f"{slug}/{filename}")
             except Exception as e:
                 errors.append(f"[file] Failed to download {url}: {e}")
 
@@ -91,7 +92,8 @@ class FilePlugin(OfflinePlugin):
 
         errors = []
         artifacts: list[str] = []
-        file_dir = ctx.bundle_dir / "file"
+        slug = ctx.task_slug or "default"
+        file_dir = ctx.bundle_dir / slug
 
         for f in files:
             url = f["url"]

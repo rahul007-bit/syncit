@@ -64,14 +64,28 @@ def _dump_manifest(manifest: dict, path: Path) -> None:
         )
 
 
+def _print_catalog_table(catalog: dict) -> None:
+    """Print a compact table of all catalog entries so the user can see what's available."""
+    from rich.table import Table
+    table = Table(box=None, padding=(0, 2), show_header=True, header_style="bold dim")
+    table.add_column("Package", style="cyan", no_wrap=True)
+    table.add_column("Category", style="dim", no_wrap=True)
+    table.add_column("Description")
+    for key, data in catalog.items():
+        table.add_row(key, data.get("category", ""), data.get("description", ""))
+    console.print(table)
+
+
 def _catalog_search_prompt(catalog: dict) -> str | None:
     """
-    Keyword-searchable catalog picker using autocomplete.
-    Type any part of the entry ID, description, or category to filter.
-    Returns the catalog key selected, or None if cancelled.
+    Show a table of all entries, then an autocomplete prompt to filter by
+    keyword.  Returns the catalog key selected, or None if cancelled.
     """
     if not catalog:
         return None
+
+    # Always print the full list first so the user can see what's available.
+    _print_catalog_table(catalog)
 
     # Map display label → catalog key so we can look up after selection.
     choice_map: dict[str, str] = {}
@@ -84,7 +98,7 @@ def _catalog_search_prompt(catalog: dict) -> str | None:
     labels = list(choice_map.keys())
 
     selected = questionary.autocomplete(
-        "Search packages (type to filter):",
+        "Search (type to filter, Enter to confirm):",
         choices=labels,
         match_middle=True,
         ignore_case=True,
@@ -92,6 +106,7 @@ def _catalog_search_prompt(catalog: dict) -> str | None:
     ).ask()
 
     return choice_map.get(selected) if selected else None
+
 
 
 def _add_subtasks(
@@ -420,7 +435,8 @@ def create_cmd(
             ],
         ).ask()
 
-        if action == "Done":
+        # User pressed Ctrl+C on the action menu — treat as Done
+        if action is None or action == "Done":
             break
 
         elif action == "Reload catalog":
@@ -463,6 +479,8 @@ def create_cmd(
             pkg_data = catalog[pkg_key]
             versions = pkg_data.get("versions", ["latest"])
             pkg_version = questionary.select("Version:", choices=versions).ask()
+            if not pkg_version:  # cancelled
+                continue
 
             _add_subtasks(pkg_data, plugin_type, pkg_version, codename, tasks)
 

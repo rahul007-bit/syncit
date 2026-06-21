@@ -309,7 +309,7 @@ class DnfPlugin(OfflinePlugin):
             artifacts.append(str(repo_path))
 
             res_inst = subprocess.run(
-                ["dnf", "install", "-y"] + packages,
+                ["dnf", "install", "-y", "--disablerepo=*", f"--enablerepo=syncit-{slug}"] + packages,
                 capture_output=True,
                 text=True,
             )
@@ -376,7 +376,7 @@ baseurl=file:///srv/offline/dnf/{slug}
 enabled=1
 gpgcheck=0
 EOF
-dnf install -y {packages}
+dnf install -y --disablerepo=* --enablerepo=syncit-{slug} {packages}
 """
 
 

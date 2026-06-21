@@ -35,9 +35,9 @@
             "repos": [
               {
                 "name": "kubernetes",
-                "url": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/",
-                "gpg_key": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key",
-                "gpgcheck": true
+                "gpgcheck": true,
+                "baseurl": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/",
+                "gpgkey": "https://pkgs.k8s.io/core:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key"
               }
             ],
             "packages": [
@@ -102,8 +102,8 @@
             "repos": [
               {
                 "name": "crio",
-                "url": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/",
-                "gpg_key": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key"
+                "baseurl": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/",
+                "gpgkey": "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{major_minor}/rpm/repodata/repomd.xml.key"
               }
             ],
             "packages": [
@@ -148,8 +148,8 @@
             "repos": [
               {
                 "name": "pgdg",
-                "url": "https://download.postgresql.org/pub/repos/yum/{version}/redhat/rhel-$releasever-$basearch",
-                "gpg_key": "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
+                "baseurl": "https://download.postgresql.org/pub/repos/yum/{version}/redhat/rhel-$releasever-$basearch",
+                "gpgkey": "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
               }
             ],
             "packages": [
@@ -182,8 +182,8 @@
             "repos": [
               {
                 "name": "pgdg",
-                "url": "https://download.postgresql.org/pub/repos/yum/{version}/redhat/rhel-$releasever-$basearch",
-                "gpg_key": "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
+                "baseurl": "https://download.postgresql.org/pub/repos/yum/{version}/redhat/rhel-$releasever-$basearch",
+                "gpgkey": "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
               }
             ],
             "packages": [

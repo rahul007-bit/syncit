@@ -129,8 +129,9 @@ def run_pack(
         try:
             # 1. Validate the task config first
             validation_errors = plugin.validate(task.config)
-            if validation_errors:
-                # Check if we can auto-install any missing dependencies
+            
+            # Keep trying to resolve missing dependencies as long as we know how
+            while validation_errors:
                 missing_pkg = None
                 install_cmd = None
                 
@@ -202,14 +203,23 @@ def run_pack(
                                 res = run_privileged(install_cmd, capture_output=True, text=True)
                                 if res.returncode == 0:
                                     console.print(f"[green]Successfully installed '{missing_pkg}'![/green]")
-                                    # Re-run validation
+                                    # Re-run validation and loop again to catch any other missing packages
                                     validation_errors = plugin.validate(task.config)
+                                    continue
                                 else:
                                     err_console.print(f"[red]Failed to install '{missing_pkg}': {res.stderr.strip()}[/red]")
+                                    break
                             except Exception as e:
                                 err_console.print(f"[red]Error during install: {e}[/red]")
+                                break
+                        else:
+                            break # User declined
                     else:
                         console.print(f"[yellow]Warning: '{missing_pkg}' is missing, but cannot auto-install because the session is non-interactive. Please install it manually.[/yellow]")
+                        break
+                else:
+                    # We don't know how to resolve the remaining errors
+                    break
 
             if validation_errors:
                 err_console.print(f"  [bold red]✗ VALIDATION FAILED:[/] {task.name}")

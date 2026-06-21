@@ -104,9 +104,15 @@ class DnfPlugin(OfflinePlugin):
         keys_dir = dnf_dir / "keys"
         rpm_dir.mkdir(parents=True, exist_ok=True)
 
-        # Cache directory
+        # Cache directory (used by DNF via --setopt=cachedir for network efficiency)
         cache_dir = Path("~/.cache/syncit/dnf").expanduser()
         cache_dir.mkdir(parents=True, exist_ok=True)
+
+        if ctx.no_cache:
+            if ctx.verbose:
+                print(f"[dnf] --no-cache: clearing local cache at {cache_dir}...")
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
 
         # ── Phase 0: Process upstream repos ─────────────────────────────────
         extra_repo_opts: list[str] = []

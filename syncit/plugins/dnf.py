@@ -186,7 +186,7 @@ class DnfPlugin(OfflinePlugin):
         # copy only the RPMs that were actually fetched in this run.
         pre_download_rpms = {f.name for f in cache_dir.iterdir() if f.is_file() and f.suffix == ".rpm"}
 
-        dl_cmd = ["dnf", "download", "--resolve", "--destdir", str(cache_dir)]
+        dl_cmd = ["dnf", "download", "--resolve", "-y", "--destdir", str(cache_dir)]
 
         # If the user declared custom repos, disable all system repos and rely
         # only on those injected repos. This prevents conflicts like

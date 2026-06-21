@@ -490,6 +490,12 @@ def create_cmd(
         for t in tasks:
             if "base_installroot" in t:
                 del t["base_installroot"]
+    else:
+        # If enabled, inject into all existing apt/dnf tasks
+        if base_root_path:
+            for t in tasks:
+                if t.get("plugin") in ("apt", "dnf"):
+                    t["base_installroot"] = base_root_path
 
     # ── Task loop ─────────────────────────────────────────────────────────
     while True:

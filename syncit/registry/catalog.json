@@ -165,6 +165,13 @@
           "apt": {
             "name": "Install PostgreSQL Client {version}",
             "plugin": "apt",
+            "repos": [
+              {
+                "name": "pgdg",
+                "url": "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt {codename}-pgdg main",
+                "gpg_key": "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+              }
+            ],
             "packages": [
               "postgresql-client-{version}"
             ]
@@ -172,6 +179,13 @@
           "dnf": {
             "name": "Install PostgreSQL Client {version}",
             "plugin": "dnf",
+            "repos": [
+              {
+                "name": "pgdg",
+                "url": "https://download.postgresql.org/pub/repos/yum/{version}/redhat/rhel-$releasever-$basearch",
+                "gpg_key": "https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG"
+              }
+            ],
             "packages": [
               "postgresql{version}"
             ]

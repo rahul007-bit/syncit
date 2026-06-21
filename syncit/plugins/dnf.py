@@ -235,6 +235,12 @@ class DnfPlugin(OfflinePlugin):
             dl_cmd.extend(extra_repo_opts)
             dl_cmd.extend(packages)
 
+            if ctx.verbose:
+                print(f"[DEBUG DNF] task_spec.get('arch') = {task_spec.get('arch')}")
+                print(f"[DEBUG DNF] ctx.targets = {ctx.targets}")
+                print(f"[DEBUG DNF] resolved arch = {arch}")
+                print(f"[DEBUG DNF] dl_cmd = {dl_cmd}")
+
             res = subprocess.run(dl_cmd, capture_output=True, text=True)
             if res.returncode != 0:
                 errors.append(f"[dnf] download failed: {res.stderr}")

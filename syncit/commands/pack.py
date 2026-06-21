@@ -149,13 +149,36 @@ def run_pack(
                         install_cmd = ["apt-get", "install", "-y", "createrepo-c"]
                 # Check for podman/docker/skopeo missing
                 elif any("skopeo', 'docker', nor 'podman'" in err for err in validation_errors):
-                    missing_pkg = "podman"
                     if shutil.which("dnf"):
-                        install_cmd = ["dnf", "install", "-y", "podman"]
+                        if subprocess.run(["dnf", "info", "skopeo"], capture_output=True).returncode == 0:
+                            missing_pkg = "skopeo"
+                            install_cmd = ["dnf", "install", "-y", "skopeo"]
+                        elif subprocess.run(["dnf", "info", "podman"], capture_output=True).returncode == 0:
+                            missing_pkg = "podman"
+                            install_cmd = ["dnf", "install", "-y", "podman"]
+                        else:
+                            missing_pkg = "docker"
+                            install_cmd = ["dnf", "install", "-y", "docker"]
                     elif shutil.which("yum"):
-                        install_cmd = ["yum", "install", "-y", "podman"]
+                        if subprocess.run(["yum", "info", "skopeo"], capture_output=True).returncode == 0:
+                            missing_pkg = "skopeo"
+                            install_cmd = ["yum", "install", "-y", "skopeo"]
+                        elif subprocess.run(["yum", "info", "podman"], capture_output=True).returncode == 0:
+                            missing_pkg = "podman"
+                            install_cmd = ["yum", "install", "-y", "podman"]
+                        else:
+                            missing_pkg = "docker"
+                            install_cmd = ["yum", "install", "-y", "docker"]
                     elif shutil.which("apt-get"):
-                        install_cmd = ["apt-get", "install", "-y", "podman"]
+                        if subprocess.run(["apt-cache", "show", "skopeo"], capture_output=True).returncode == 0:
+                            missing_pkg = "skopeo"
+                            install_cmd = ["apt-get", "install", "-y", "skopeo"]
+                        elif subprocess.run(["apt-cache", "show", "podman"], capture_output=True).returncode == 0:
+                            missing_pkg = "podman"
+                            install_cmd = ["apt-get", "install", "-y", "podman"]
+                        else:
+                            missing_pkg = "docker.io"
+                            install_cmd = ["apt-get", "install", "-y", "docker.io"]
                 # Check for dnf-plugins-core
                 elif any("dnf-plugins-core" in err for err in validation_errors):
                     missing_pkg = "dnf-plugins-core"

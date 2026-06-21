@@ -39,6 +39,36 @@ def _detect_codename() -> str:
     return ""
 
 
+def _detect_distro() -> str:
+    """Read the local OS distro name from /etc/os-release, or return ''."""
+    try:
+        id_val = ""
+        id_like_val = ""
+        with open("/etc/os-release") as f:
+            for line in f:
+                if line.startswith("ID="):
+                    id_val = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
+                elif line.startswith("ID_LIKE="):
+                    id_like_val = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
+        
+        mapping = {
+            "ubuntu": "Ubuntu",
+            "debian": "Debian",
+            "rhel": "RHEL",
+            "rocky": "Rocky",
+            "almalinux": "AlmaLinux",
+        }
+        if id_val in mapping:
+            return mapping[id_val]
+            
+        for token in id_like_val.split():
+            if token in mapping:
+                return mapping[token]
+    except OSError:
+        pass
+    return ""
+
+
 def _load_manifest(path: Path) -> dict:
     with open(path) as f:
         return yaml.safe_load(f) or {}
@@ -376,8 +406,23 @@ def create_cmd(
     version = questionary.text("Version:", default=meta.get("version", "1.0.0")).ask()
 
     existing_distro_raw = targets.get("distro", "")
-    existing_distro = existing_distro_raw.capitalize() if existing_distro_raw else ""
-    default_distro = existing_distro if existing_distro in DISTRO_CHOICES else "Ubuntu"
+    mapping = {
+        "ubuntu": "Ubuntu",
+        "debian": "Debian",
+        "rhel": "RHEL",
+        "rocky": "Rocky",
+        "almalinux": "AlmaLinux",
+    }
+    existing_distro = mapping.get(existing_distro_raw.lower(), "")
+    detected_distro = _detect_distro()
+
+    if existing_distro:
+        default_distro = existing_distro
+    elif detected_distro:
+        default_distro = detected_distro
+    else:
+        default_distro = "Ubuntu"
+
     distro_choice = questionary.select(
         "Target distro:",
         choices=DISTRO_CHOICES,

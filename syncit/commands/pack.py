@@ -147,22 +147,29 @@ def run_pack(
                         install_cmd = ["yum", "install", "-y", "createrepo_c"]
                     elif shutil.which("apt-get"):
                         install_cmd = ["apt-get", "install", "-y", "createrepo-c"]
-                # Check for skopeo
-                elif any("skopeo" in err for err in validation_errors):
-                    missing_pkg = "skopeo"
-                    if shutil.which("apt-get"):
-                        install_cmd = ["apt-get", "install", "-y", "skopeo"]
-                    elif shutil.which("dnf"):
-                        install_cmd = ["dnf", "install", "-y", "skopeo"]
+                # Check for podman/docker/skopeo missing
+                elif any("skopeo', 'docker', nor 'podman'" in err for err in validation_errors):
+                    missing_pkg = "podman"
+                    if shutil.which("dnf"):
+                        install_cmd = ["dnf", "install", "-y", "podman"]
                     elif shutil.which("yum"):
-                        install_cmd = ["yum", "install", "-y", "skopeo"]
+                        install_cmd = ["yum", "install", "-y", "podman"]
+                    elif shutil.which("apt-get"):
+                        install_cmd = ["apt-get", "install", "-y", "podman"]
+                # Check for dnf-plugins-core
+                elif any("dnf-plugins-core" in err for err in validation_errors):
+                    missing_pkg = "dnf-plugins-core"
+                    if shutil.which("dnf"):
+                        install_cmd = ["dnf", "install", "-y", "dnf-plugins-core"]
+                    elif shutil.which("yum"):
+                        install_cmd = ["yum", "install", "-y", "dnf-plugins-core"]
 
                 if missing_pkg and install_cmd:
                     import sys
                     if sys.stdout.isatty():
                         import questionary
                         if questionary.confirm(
-                            f"Command for '{plugin_name}' is missing. Would you like to install package '{missing_pkg}' automatically? (requires sudo)",
+                            f"Command or plugin for '{plugin_name}' is missing. Would you like to install package '{missing_pkg}' automatically? (requires sudo)",
                             default=True
                         ).ask():
                             console.print(f"[cyan]Installing '{missing_pkg}'...[/cyan]")

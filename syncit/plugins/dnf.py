@@ -90,6 +90,15 @@ class DnfPlugin(OfflinePlugin):
                             f"[dnf] repos[{i}]['{repo['name']}'] has 'gpgkey' but neither 'curl' nor 'wget' is installed"
                         )
 
+        # Check if dnf download plugin is installed
+        if shutil.which("dnf"):
+            try:
+                res = subprocess.run(["dnf", "download", "--help"], capture_output=True, text=True)
+                if res.returncode != 0 and "No such command: download" in res.stderr:
+                    errors.append("[dnf] DNF download plugin is missing (install 'dnf-plugins-core')")
+            except Exception:
+                pass
+
         return errors
 
     def pack(self, task_spec: dict[str, Any], ctx: PackContext) -> PluginResult:

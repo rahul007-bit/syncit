@@ -124,6 +124,51 @@ def run_pack(
             # 1. Validate the task config first
             validation_errors = plugin.validate(task.config)
             if validation_errors:
+                # Check if we can auto-install any missing dependencies
+                missing_pkg = None
+                install_cmd = None
+                
+                # Check for dpkg-scanpackages (dpkg-dev)
+                if any("dpkg-scanpackages" in err for err in validation_errors):
+                    missing_pkg = "dpkg-dev"
+                    install_cmd = ["apt-get", "install", "-y", "dpkg-dev"]
+                # Check for createrepo_c
+                elif any("createrepo_c" in err for err in validation_errors):
+                    missing_pkg = "createrepo_c"
+                    if shutil.which("dnf"):
+                        install_cmd = ["dnf", "install", "-y", "createrepo_c"]
+                    elif shutil.which("yum"):
+                        install_cmd = ["yum", "install", "-y", "createrepo_c"]
+                # Check for skopeo
+                elif any("skopeo" in err for err in validation_errors):
+                    missing_pkg = "skopeo"
+                    if shutil.which("apt-get"):
+                        install_cmd = ["apt-get", "install", "-y", "skopeo"]
+                    elif shutil.which("dnf"):
+                        install_cmd = ["dnf", "install", "-y", "skopeo"]
+                    elif shutil.which("yum"):
+                        install_cmd = ["yum", "install", "-y", "skopeo"]
+
+                if missing_pkg and install_cmd:
+                    import questionary
+                    if questionary.confirm(
+                        f"Command for '{plugin_name}' is missing. Would you like to install package '{missing_pkg}' automatically? (requires sudo)",
+                        default=True
+                    ).ask():
+                        console.print(f"[cyan]Installing '{missing_pkg}'...[/cyan]")
+                        try:
+                            from syncit.plugins.base import run_privileged
+                            res = run_privileged(install_cmd, capture_output=True, text=True)
+                            if res.returncode == 0:
+                                console.print(f"[green]Successfully installed '{missing_pkg}'![/green]")
+                                # Re-run validation
+                                validation_errors = plugin.validate(task.config)
+                            else:
+                                err_console.print(f"[red]Failed to install '{missing_pkg}': {res.stderr.strip()}[/red]")
+                        except Exception as e:
+                            err_console.print(f"[red]Error during install: {e}[/red]")
+
+            if validation_errors:
                 err_console.print(f"  [bold red]✗ VALIDATION FAILED:[/] {task.name}")
                 for err in validation_errors:
                     err_console.print(f"    [red]{err}[/]")

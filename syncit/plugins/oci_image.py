@@ -104,12 +104,19 @@ class OciImagePlugin(OfflinePlugin):
         if not images or not isinstance(images, list):
             errors.append("[oci_image] 'images' must be a non-empty list")
             return errors
+        
+        normalized_images = []
         for i, img in enumerate(images):
-            if not isinstance(img, dict) or "source" not in img:
-                errors.append(f"[oci_image] Image at index {i} must have a 'source' key")
-            else:
-                # Normalize early so all other methods see the fully qualified name
+            if isinstance(img, str):
+                normalized_images.append({"source": _normalize_ref(img)})
+            elif isinstance(img, dict) and "source" in img and isinstance(img["source"], str):
                 img["source"] = _normalize_ref(img["source"])
+                normalized_images.append(img)
+            else:
+                errors.append(f"[oci_image] Image at index {i} must be a string or a dict with a 'source' key")
+
+        if not errors:
+            task_spec["images"] = normalized_images
 
         # Check for skopeo, docker, or podman at validate time
         if not _has_cmd("skopeo") and not _has_cmd("podman") and not _has_cmd("docker"):
@@ -420,11 +427,17 @@ class OciImagePlugin(OfflinePlugin):
         # Read the manifest entries so we can generate explicit skopeo/tag commands
         # rather than a generic glob loop. This is critical to avoid <none>:<none>
         # images caused by `podman load` dropping registry prefixes from oci-archives.
-        images: list[dict] = task_spec.get("images", [])
+        raw_images = task_spec.get("images", [])
+        images: list[dict] = []
+        for img in raw_images:
+            if isinstance(img, str):
+                images.append({"source": _normalize_ref(img)})
+            elif isinstance(img, dict) and "source" in img:
+                images.append({"source": _normalize_ref(img["source"])})
 
         load_lines: list[str] = []
         for img in images:
-            source = _normalize_ref(img["source"])
+            source = img["source"]
             safe = _safe_name(source)
             tar = f"$BUNDLE_DIR/{bundle_subdir}/{safe}.tar"
             load_lines.append(

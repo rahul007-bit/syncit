@@ -17,6 +17,9 @@ from syncit.plugins.base import (
     OfflinePlugin,
     PackContext,
     PluginResult,
+    copytree_privileged,
+    run_privileged,
+    write_privileged_file,
 )
 from syncit.plugins.registry import registry
 
@@ -118,6 +121,13 @@ class AptPlugin(OfflinePlugin):
         if repos:
             keys_dir.mkdir(exist_ok=True)
             temp_sources = tempfile.mkdtemp(prefix="syncit-apt-")
+            temp_sources_d = Path(temp_sources) / "sources.list.d"
+            temp_sources_d.mkdir(parents=True, exist_ok=True)
+
+            # Copy main sources.list if it exists
+            main_sources = Path("/etc/apt/sources.list")
+            if main_sources.exists():
+                shutil.copy2(str(main_sources), str(Path(temp_sources) / "sources.list"))
 
             if ctx.verbose:
                 from rich import print as rprint
@@ -165,7 +175,7 @@ class AptPlugin(OfflinePlugin):
                     else:
                         entry = entry.replace("deb ", "deb [trusted=yes] ", 1)
 
-                (Path(temp_sources) / f"{name}.list").write_text(entry + "\n")
+                (temp_sources_d / f"{name}.list").write_text(entry + "\n")
                 if ctx.verbose:
                     rprint(f"    [dim]Added repo '{name}' for pack[/dim]")
 
@@ -173,24 +183,30 @@ class AptPlugin(OfflinePlugin):
             sys_sources_d = Path("/etc/apt/sources.list.d")
             if sys_sources_d.exists():
                 for f in sys_sources_d.glob("*.list"):
-                    shutil.copy2(str(f), str(Path(temp_sources) / f.name))
+                    shutil.copy2(str(f), str(temp_sources_d / f.name))
                 # Ubuntu 24.04+ uses deb822 .sources format
                 for f in sys_sources_d.glob("*.sources"):
-                    shutil.copy2(str(f), str(Path(temp_sources) / f.name))
+                    shutil.copy2(str(f), str(temp_sources_d / f.name))
+
+            # Set up user-space caches
+            apt_cache_root = Path("~/.cache/syncit/apt-root").expanduser()
+            state_dir = apt_cache_root / "state"
+            cache_dir = apt_cache_root / "cache"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            cache_dir.mkdir(parents=True, exist_ok=True)
 
             extra_opts = [
-                "-o",
-                f"Dir::Etc::SourceParts={temp_sources}",
-                "-o",
-                "Dir::Etc::SourceList=/etc/apt/sources.list",
+                "-o", f"Dir::State={state_dir}",
+                "-o", f"Dir::Cache={cache_dir}",
             ]
+            if (Path(temp_sources) / "sources.list").exists():
+                extra_opts.extend(["-o", f"Dir::Etc::SourceList={Path(temp_sources) / 'sources.list'}"])
+            extra_opts.extend(["-o", f"Dir::Etc::SourceParts={temp_sources_d}"])
 
             # apt-get update with combined sources so the cache knows about custom repos
             upd = _run(["apt-get", "update"] + extra_opts, timeout=120)
             if upd.returncode != 0:
-                errors.append(
-                    f"[apt] apt-get update failed with custom repos: {upd.stderr.strip()}"
-                )
+                print(f"[apt] WARNING: apt-get update returned non-zero code: {upd.stderr.strip()}", file=sys.stderr)
 
         try:
             # ── Phase 1: Resolve dependencies for each package ──
@@ -437,15 +453,14 @@ class AptPlugin(OfflinePlugin):
             )
 
         # 1. Copy bundle_apt to target
-        shutil.copytree(str(bundle_apt), str(target_dir), dirs_exist_ok=True)
+        copytree_privileged(bundle_apt, target_dir)
 
         # 3. Write sources.list.d entry
         sources_dir = Path("/etc/apt/sources.list.d")
-        sources_dir.mkdir(parents=True, exist_ok=True)
-        (sources_dir / f"offline-{slug}.list").write_text(f"deb [trusted=yes] file://{target_dir} ./\n")
+        write_privileged_file(sources_dir / f"offline-{slug}.list", f"deb [trusted=yes] file://{target_dir} ./\n")
 
         # 4. Update apt cache
-        upd = _run(["apt-get", "update"])
+        upd = run_privileged(["apt-get", "update"], capture_output=True)
         if upd.returncode != 0:
             return PluginResult(
                 success=False,
@@ -474,7 +489,7 @@ class AptPlugin(OfflinePlugin):
 
         # 6. Install
         inst_cmd = ["apt-get", "install", "-y", "--no-install-recommends"] + to_install
-        inst_res = _run(inst_cmd)
+        inst_res = run_privileged(inst_cmd, capture_output=True)
         if inst_res.returncode != 0:
             return PluginResult(
                 success=False,

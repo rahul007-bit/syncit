@@ -40,7 +40,20 @@ def _detect_codename() -> str:
 
 
 def _detect_releasever() -> str:
-    """Read the local OS release version from /etc/os-release (VERSION_ID major), or return ''."""
+    """Read the exact OS release version used natively by DNF, fallback to VERSION_ID."""
+    import subprocess
+    try:
+        # Use the system Python to break out of any virtualenv and query the native DNF config.
+        # This handles complex cases like Amazon Linux 2023 (e.g. 2023.11.20260526)
+        res = subprocess.run(
+            ["/usr/bin/python3", "-c", "import dnf; base=dnf.Base(); base.read_all_repos(); print(base.conf.releasever)"],
+            capture_output=True, text=True, timeout=5
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+
     try:
         with open("/etc/os-release") as f:
             for line in f:
@@ -70,6 +83,8 @@ def _detect_distro() -> str:
             "rhel": "RHEL",
             "rocky": "Rocky",
             "almalinux": "AlmaLinux",
+            "amzn": "Amazon Linux",
+            "amazon linux": "Amazon Linux",
         }
         if id_val in mapping:
             return mapping[id_val]

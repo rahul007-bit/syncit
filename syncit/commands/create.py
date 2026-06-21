@@ -484,18 +484,37 @@ def create_cmd(
         if base_root_path:
             root_path = Path(base_root_path).expanduser().resolve()
             if not root_path.is_dir():
-                if questionary.confirm(
-                    f"Directory '{root_path}' does not exist. Auto-create minimal structure? (requires sudo)",
-                    default=True
-                ).ask():
+                choice = questionary.select(
+                    f"Directory '{root_path}' does not exist. How would you like to initialize it? (requires sudo)",
+                    choices=[
+                        questionary.Choice("Empty Directory (Downloads ALL dependencies - Safer, Larger bundle)", "empty"),
+                        questionary.Choice(f"Minimal OS Base (Uses {'debootstrap' if plugin_type == 'apt' else 'dnf @core'} - Optimized, Slower)", "baseos"),
+                        questionary.Choice("Do not create", "none")
+                    ]
+                ).ask()
+
+                if choice in ("empty", "baseos"):
                     from syncit.plugins.base import run_privileged
                     rprint(f"[cyan]Creating base_installroot at {root_path}...[/cyan]")
                     if plugin_type == "apt":
-                        run_privileged(["mkdir", "-p", f"{root_path}/var/lib/dpkg"])
-                        run_privileged(["touch", f"{root_path}/var/lib/dpkg/status"])
+                        if choice == "empty":
+                            run_privileged(["mkdir", "-p", f"{root_path}/var/lib/dpkg"])
+                            run_privileged(["touch", f"{root_path}/var/lib/dpkg/status"])
+                        else:
+                            cn = codename or "noble"
+                            rprint(f"[dim]Running: debootstrap {cn} {root_path}[/dim]")
+                            res = run_privileged(["debootstrap", cn, str(root_path)])
+                            if res.returncode != 0:
+                                rprint(f"[red]debootstrap failed (is it installed?):[/] {res.stderr}")
                     else:
-                        run_privileged(["mkdir", "-p", str(root_path)])
-                    rprint(f"[green]Successfully created {root_path}[/green]")
+                        if choice == "empty":
+                            run_privileged(["mkdir", "-p", str(root_path)])
+                        else:
+                            rprint(f"[dim]Running: dnf install --installroot {root_path} @core -y[/dim]")
+                            res = run_privileged(["dnf", "install", "--installroot", str(root_path), "@core", "-y"])
+                            if res.returncode != 0:
+                                rprint(f"[red]dnf install failed:[/] {res.stderr}")
+                    rprint(f"[green]Successfully initialized {root_path}[/green]")
 
     # Carry forward existing tasks; new tasks appended in the loop below
     tasks: list = list(existing.get("spec", {}).get("tasks", []))

@@ -130,8 +130,9 @@ def run_pack(
                 
                 # Check for dpkg-scanpackages (dpkg-dev)
                 if any("dpkg-scanpackages" in err for err in validation_errors):
-                    missing_pkg = "dpkg-dev"
-                    install_cmd = ["apt-get", "install", "-y", "dpkg-dev"]
+                    if shutil.which("apt-get"):
+                        missing_pkg = "dpkg-dev"
+                        install_cmd = ["apt-get", "install", "-y", "dpkg-dev"]
                 # Check for createrepo_c
                 elif any("createrepo_c" in err for err in validation_errors):
                     missing_pkg = "createrepo_c"
@@ -139,6 +140,8 @@ def run_pack(
                         install_cmd = ["dnf", "install", "-y", "createrepo_c"]
                     elif shutil.which("yum"):
                         install_cmd = ["yum", "install", "-y", "createrepo_c"]
+                    elif shutil.which("apt-get"):
+                        install_cmd = ["apt-get", "install", "-y", "createrepo-c"]
                 # Check for skopeo
                 elif any("skopeo" in err for err in validation_errors):
                     missing_pkg = "skopeo"

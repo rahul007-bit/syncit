@@ -193,12 +193,10 @@ class DnfPlugin(OfflinePlugin):
                 str(temp_dl_dir),
             ]
 
-            # If the user declared custom repos, disable all system repos and rely
-            # only on those injected repos. This prevents conflicts like
-            # 'Repository kubernetes is listed more than once' when the build host
-            # already has a system-level kubernetes.repo in /etc/yum.repos.d/.
-            if repos:
-                dl_cmd.insert(2, "--disablerepo=*")
+            # Custom repos are injected via --repofrompath with a 'syncit_' prefix
+            # (e.g. syncit_kubernetes), so they never conflict with same-named system
+            # repos. System repos (baseos, appstream) remain enabled so DNF can read
+            # their metadata to verify base-OS deps are already in base_installroot.
 
             if base_installroot:
                 installroot_path = Path(base_installroot).expanduser().resolve()

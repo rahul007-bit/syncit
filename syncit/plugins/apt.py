@@ -125,10 +125,32 @@ class AptPlugin(OfflinePlugin):
             temp_sources_d = Path(temp_sources) / "sources.list.d"
             temp_sources_d.mkdir(parents=True, exist_ok=True)
 
-            # Copy main sources.list if it exists
+            # Extract hostnames/domains from manifest repos to detect and avoid duplicate/conflicting configurations
+            from urllib.parse import urlparse
+            conflict_domains = []
+            for repo in repos:
+                url = repo.get("url", "")
+                urls = re.findall(r'https?://[^\s\]\)]+', url)
+                for u in urls:
+                    try:
+                        parsed = urlparse(u)
+                        if parsed.netloc:
+                            conflict_domains.append(parsed.netloc)
+                    except Exception:
+                        pass
+
+            def is_conflicting(text: str) -> bool:
+                return any(domain in text for domain in conflict_domains)
+
+            # Copy main sources.list if it exists, filtering out conflicting lines
             main_sources = Path("/etc/apt/sources.list")
             if main_sources.exists():
-                shutil.copy2(str(main_sources), str(Path(temp_sources) / "sources.list"))
+                try:
+                    lines = main_sources.read_text(encoding="utf-8").splitlines()
+                    filtered_lines = [line for line in lines if not is_conflicting(line)]
+                    (Path(temp_sources) / "sources.list").write_text("\n".join(filtered_lines) + "\n", encoding="utf-8")
+                except Exception:
+                    shutil.copy2(str(main_sources), str(Path(temp_sources) / "sources.list"))
 
             if ctx.verbose:
                 from rich import print as rprint
@@ -183,11 +205,17 @@ class AptPlugin(OfflinePlugin):
             # Also include system sources.d so base OS repos resolve transitive deps
             sys_sources_d = Path("/etc/apt/sources.list.d")
             if sys_sources_d.exists():
-                for f in sys_sources_d.glob("*.list"):
-                    shutil.copy2(str(f), str(temp_sources_d / f.name))
-                # Ubuntu 24.04+ uses deb822 .sources format
-                for f in sys_sources_d.glob("*.sources"):
-                    shutil.copy2(str(f), str(temp_sources_d / f.name))
+                for f in sys_sources_d.glob("*"):
+                    if f.is_file() and (f.suffix == ".list" or f.suffix == ".sources"):
+                        try:
+                            content = f.read_text(encoding="utf-8")
+                            if is_conflicting(content):
+                                if ctx.verbose:
+                                    rprint(f"    [dim]Skipping conflicting host repository file: {f.name}[/dim]")
+                                continue
+                            shutil.copy2(str(f), str(temp_sources_d / f.name))
+                        except Exception:
+                            shutil.copy2(str(f), str(temp_sources_d / f.name))
 
             # Set up user-space caches
             apt_cache_root = Path("~/.cache/syncit/apt-root").expanduser()

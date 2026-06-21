@@ -236,10 +236,10 @@ class DnfPlugin(OfflinePlugin):
             dl_cmd.extend(packages)
 
             if ctx.verbose:
-                print(f"[DEBUG DNF] task_spec.get('arch') = {task_spec.get('arch')}")
-                print(f"[DEBUG DNF] ctx.targets = {ctx.targets}")
-                print(f"[DEBUG DNF] resolved arch = {arch}")
-                print(f"[DEBUG DNF] dl_cmd = {dl_cmd}")
+                err_console.print(f"[DEBUG DNF] task_spec.get('arch') = {task_spec.get('arch')}")
+                err_console.print(f"[DEBUG DNF] ctx.targets = {ctx.targets}")
+                err_console.print(f"[DEBUG DNF] resolved arch = {arch}")
+                err_console.print(f"[DEBUG DNF] dl_cmd = {dl_cmd}")
 
             res = subprocess.run(dl_cmd, capture_output=True, text=True)
             if res.returncode != 0:

@@ -172,68 +172,58 @@ class DnfPlugin(OfflinePlugin):
         base_installroot = task_spec.get("base_installroot")
         releasever = task_spec.get("releasever")
 
-        if ctx.no_cache:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="syncit-dnf-") as temp_dir:
+            temp_dl_dir = Path(temp_dir)
+
+            dl_cmd = ["dnf", "download", "--resolve", "-y", "--destdir", str(temp_dl_dir)]
+
+            # If the user declared custom repos, disable all system repos and rely
+            # only on those injected repos. This prevents conflicts like
+            # 'Repository kubernetes is listed more than once' when the build host
+            # already has a system-level kubernetes.repo in /etc/yum.repos.d/.
+            if repos:
+                dl_cmd.insert(2, "--disablerepo=*")
+
+            if base_installroot:
+                installroot_path = Path(base_installroot).expanduser().resolve()
+                if not installroot_path.is_dir():
+                    errors.append(
+                        f"[dnf] base_installroot '{installroot_path}' does not exist or is not a directory. "
+                        "Create it first with: dnf install --installroot <path> @core -y"
+                    )
+                    return PluginResult(False, "Invalid base_installroot", artifacts, errors)
+                dl_cmd.extend(["--installroot", str(installroot_path)])
+                if ctx.verbose:
+                    print(f"[dnf] Resolving deps against installroot: {installroot_path}")
+            else:
+                if ctx.verbose:
+                    print(
+                        "[dnf] WARNING: no base_installroot set — resolving against build host. "
+                        "Set 'base_installroot' in your manifest to a minimal OS root for accurate dep resolution."
+                    )
+
+            if releasever:
+                dl_cmd.extend(["--releasever", str(releasever)])
+
+            dl_cmd.extend(extra_repo_opts)
+            dl_cmd.extend(packages)
+
+            res = subprocess.run(dl_cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+                errors.append(f"[dnf] download failed: {res.stderr}")
+                return PluginResult(False, "Failed to download RPMs", artifacts, errors)
+
+            # Copy all resolved RPMs to the bundle.
+            resolved_rpms = [
+                f for f in temp_dl_dir.iterdir()
+                if f.is_file() and f.suffix == ".rpm"
+            ]
             if ctx.verbose:
-                print(f"[dnf] --no-cache: clearing local cache for {packages}...")
-            for pkg in packages:
-                for f in cache_dir.glob(f"{pkg}-*"):
-                    try:
-                        f.unlink()
-                    except OSError:
-                        pass
-
-        # Snapshot what's already in cache before the download so we can
-        # copy only the RPMs that were actually fetched in this run.
-        pre_download_rpms = {f.name for f in cache_dir.iterdir() if f.is_file() and f.suffix == ".rpm"}
-
-        dl_cmd = ["dnf", "download", "--resolve", "-y", "--destdir", str(cache_dir)]
-
-        # If the user declared custom repos, disable all system repos and rely
-        # only on those injected repos. This prevents conflicts like
-        # 'Repository kubernetes is listed more than once' when the build host
-        # already has a system-level kubernetes.repo in /etc/yum.repos.d/.
-        if repos:
-            dl_cmd.insert(2, "--disablerepo=*")
-
-        if base_installroot:
-            installroot_path = Path(base_installroot).expanduser().resolve()
-            if not installroot_path.is_dir():
-                errors.append(
-                    f"[dnf] base_installroot '{installroot_path}' does not exist or is not a directory. "
-                    "Create it first with: dnf install --installroot <path> @core -y"
-                )
-                return PluginResult(False, "Invalid base_installroot", artifacts, errors)
-            dl_cmd.extend(["--installroot", str(installroot_path)])
-            if ctx.verbose:
-                print(f"[dnf] Resolving deps against installroot: {installroot_path}")
-        else:
-            if ctx.verbose:
-                print(
-                    "[dnf] WARNING: no base_installroot set — resolving against build host. "
-                    "Set 'base_installroot' in your manifest to a minimal OS root for accurate dep resolution."
-                )
-
-        if releasever:
-            dl_cmd.extend(["--releasever", str(releasever)])
-
-        dl_cmd.extend(extra_repo_opts)
-        dl_cmd.extend(packages)
-
-        res = subprocess.run(dl_cmd, capture_output=True, text=True)
-        if res.returncode != 0:
-            errors.append(f"[dnf] download failed: {res.stderr}")
-            return PluginResult(False, "Failed to download RPMs", artifacts, errors)
-
-        # 2. Copy only the RPMs that were downloaded in this run to the bundle.
-        #    (cache_dir may contain RPMs from previous pack runs — exclude those)
-        newly_downloaded = [
-            f for f in cache_dir.iterdir()
-            if f.is_file() and f.suffix == ".rpm" and f.name not in pre_download_rpms
-        ]
-        if ctx.verbose:
-            print(f"[dnf] Downloaded {len(newly_downloaded)} new RPM(s) to bundle.")
-        for f in newly_downloaded:
-            shutil.copy2(f, rpm_dir / f.name)
+                print(f"[dnf] Downloaded/resolved {len(resolved_rpms)} RPM(s) to bundle.")
+            for f in resolved_rpms:
+                shutil.copy2(f, rpm_dir / f.name)
 
         res2 = subprocess.run(
             ["createrepo_c", str(rpm_dir)],

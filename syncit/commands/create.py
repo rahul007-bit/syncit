@@ -480,6 +480,22 @@ def create_cmd(
             "Base installroot path (e.g. / or /var/lib/minimal-root):",
             default=existing_base
         ).ask()
+        
+        if base_root_path:
+            root_path = Path(base_root_path).expanduser().resolve()
+            if not root_path.is_dir():
+                if questionary.confirm(
+                    f"Directory '{root_path}' does not exist. Auto-create minimal structure? (requires sudo)",
+                    default=True
+                ).ask():
+                    from syncit.plugins.base import run_privileged
+                    rprint(f"[cyan]Creating base_installroot at {root_path}...[/cyan]")
+                    if plugin_type == "apt":
+                        run_privileged(["mkdir", "-p", f"{root_path}/var/lib/dpkg"])
+                        run_privileged(["touch", f"{root_path}/var/lib/dpkg/status"])
+                    else:
+                        run_privileged(["mkdir", "-p", str(root_path)])
+                    rprint(f"[green]Successfully created {root_path}[/green]")
 
     # Carry forward existing tasks; new tasks appended in the loop below
     tasks: list = list(existing.get("spec", {}).get("tasks", []))

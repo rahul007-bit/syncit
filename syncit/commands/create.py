@@ -19,7 +19,7 @@ from syncit.commands.up import run_up
 
 console = Console()
 
-DISTRO_CHOICES = ["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux"]
+DISTRO_CHOICES = ["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux", "Amazon Linux"]
 APT_DISTROS = {"Ubuntu", "Debian"}
 
 
@@ -34,6 +34,19 @@ def _detect_codename() -> str:
             for line in f:
                 if line.startswith("VERSION_CODENAME="):
                     return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def _detect_releasever() -> str:
+    """Read the local OS release version from /etc/os-release (VERSION_ID major), or return ''."""
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                if line.startswith("VERSION_ID="):
+                    val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    return val.split(".")[0] if "." in val else val
     except OSError:
         pass
     return ""
@@ -412,6 +425,8 @@ def create_cmd(
         "rhel": "RHEL",
         "rocky": "Rocky",
         "almalinux": "AlmaLinux",
+        "amzn": "Amazon Linux",
+        "amazon linux": "Amazon Linux",
     }
     existing_distro = mapping.get(existing_distro_raw.lower(), "")
     detected_distro = _detect_distro()
@@ -464,10 +479,27 @@ def create_cmd(
 
     # DNF releasever prompt (stored as codename to reuse manifest structure)
     if plugin_type == "dnf":
+        detected_releasever = _detect_releasever()
         existing_releasever = targets.get("codename", "")
+        default_releasever = existing_releasever or detected_releasever or "9"
+        
+        hints: list[str] = []
+        if detected_releasever:
+            hints.append(
+                f"  [cyan]{detected_releasever}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
+            )
+        if existing_releasever and existing_releasever != detected_releasever:
+            hints.append(
+                f"  [cyan]{existing_releasever}[/cyan]  [dim](current in file)[/dim]"
+            )
+        if hints:
+            rprint("[dim]Release version hints:[/dim]")
+            for h in hints:
+                rprint(h)
+                
         codename = questionary.text(
-            "Release version (e.g. 9 for Rocky 9, 8 for Alma 8):",
-            default=existing_releasever,
+            "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
+            default=default_releasever,
         ).ask()
 
     # Base installroot prompt

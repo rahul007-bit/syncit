@@ -177,7 +177,15 @@ class DnfPlugin(OfflinePlugin):
         with tempfile.TemporaryDirectory(prefix="syncit-dnf-") as temp_dir:
             temp_dl_dir = Path(temp_dir)
 
-            dl_cmd = ["dnf", "download", "--resolve", "-y", "--destdir", str(temp_dl_dir)]
+            dl_cmd = [
+                "dnf",
+                "download",
+                "--resolve",
+                "-y",
+                f"--setopt=cachedir={cache_dir}",
+                "--destdir",
+                str(temp_dl_dir),
+            ]
 
             # If the user declared custom repos, disable all system repos and rely
             # only on those injected repos. This prevents conflicts like

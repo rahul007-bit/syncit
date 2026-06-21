@@ -1,0 +1,26 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: docker
+  version: latest
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+  tasks:
+    - name: Install Docker CE
+      plugin: dnf
+      releasever: "9"
+      base_installroot: /tmp/rocky-root
+      repos:
+        - name: docker-ce-stable
+          baseurl: https://download.docker.com/linux/centos/9/x86_64/stable/
+          gpgkey: https://download.docker.com/linux/centos/gpg
+          gpgcheck: "1"
+      packages:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin

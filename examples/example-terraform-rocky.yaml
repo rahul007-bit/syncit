@@ -1,0 +1,22 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: terraform
+  version: latest
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+  tasks:
+    - name: Install Terraform
+      plugin: dnf
+      releasever: "9"
+      base_installroot: /tmp/rocky-root
+      repos:
+        - name: hashicorp
+          baseurl: https://rpm.releases.hashicorp.com/RHEL/9/x86_64/stable
+          gpgkey: https://rpm.releases.hashicorp.com/gpg
+          gpgcheck: "1"
+      packages:
+        - terraform

@@ -1,0 +1,20 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: mysql
+  version: "8.0"
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+  tasks:
+    - name: Install MySQL 8.0
+      plugin: apt
+      base_installroot: /tmp/debootstrap-root
+      repos:
+        - name: mysql
+          url: deb https://repo.mysql.com/apt/ubuntu noble mysql-8.0
+          gpg_key: https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+      packages:
+        - mysql-community-server

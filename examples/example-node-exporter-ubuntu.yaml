@@ -1,0 +1,16 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: node-exporter
+  version: latest
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+  tasks:
+    - name: Install Node Exporter
+      plugin: apt
+      base_installroot: /tmp/debootstrap-root
+      packages:
+        - prometheus-node-exporter

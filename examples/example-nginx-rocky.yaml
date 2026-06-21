@@ -1,0 +1,15 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: nginx-test-rocky
+  version: 1.0.0
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+  tasks:
+    - name: Install Nginx
+      plugin: dnf
+      packages:
+        - nginx

@@ -1,0 +1,20 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: grafana
+  version: latest
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+  tasks:
+    - name: Install Grafana
+      plugin: apt
+      base_installroot: /tmp/debootstrap-root
+      repos:
+        - name: grafana
+          url: deb https://apt.grafana.com stable main
+          gpg_key: https://apt.grafana.com/gpg.key
+      packages:
+        - grafana

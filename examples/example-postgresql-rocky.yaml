@@ -1,0 +1,22 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: postgresql
+  version: "16"
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+  tasks:
+    - name: Install PostgreSQL 16
+      plugin: dnf
+      releasever: "9"
+      base_installroot: /tmp/rocky-root
+      repos:
+        - name: pgdg16
+          baseurl: https://download.postgresql.org/pub/repos/yum/16/redhat/rhel-9-x86_64/
+          gpgkey: https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG
+          gpgcheck: "1"
+      packages:
+        - postgresql16-server

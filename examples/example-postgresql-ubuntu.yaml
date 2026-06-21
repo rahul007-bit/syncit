@@ -1,0 +1,20 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: postgresql
+  version: "16"
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+  tasks:
+    - name: Install PostgreSQL 16
+      plugin: apt
+      base_installroot: /tmp/debootstrap-root
+      repos:
+        - name: pgdg
+          url: deb https://apt.postgresql.org/pub/repos/apt noble-pgdg main
+          gpg_key: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+      packages:
+        - postgresql-16

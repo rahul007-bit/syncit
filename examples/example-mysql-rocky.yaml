@@ -1,0 +1,22 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: mysql
+  version: "8.0"
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+  tasks:
+    - name: Install MySQL 8.0
+      plugin: dnf
+      releasever: "9"
+      base_installroot: /tmp/rocky-root
+      repos:
+        - name: mysql80-community
+          baseurl: https://repo.mysql.com/yum/mysql-8.0-community/el/9/x86_64/
+          gpgkey: https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+          gpgcheck: "1"
+      packages:
+        - mysql-community-server

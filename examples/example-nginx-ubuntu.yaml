@@ -1,0 +1,15 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: nginx-test
+  version: 1.0.0
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+  tasks:
+    - name: Install Nginx
+      plugin: apt
+      packages:
+        - nginx

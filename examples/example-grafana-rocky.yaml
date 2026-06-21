@@ -1,0 +1,22 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: grafana
+  version: latest
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+  tasks:
+    - name: Install Grafana
+      plugin: dnf
+      releasever: "9"
+      base_installroot: /tmp/rocky-root
+      repos:
+        - name: grafana
+          baseurl: https://rpm.grafana.com
+          gpgkey: https://rpm.grafana.com/gpg.key
+          gpgcheck: "1"
+      packages:
+        - grafana

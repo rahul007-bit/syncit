@@ -1,0 +1,15 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: test-bundle
+  version: 1.0.0
+spec:
+  targets:
+    distro: ubuntu
+    arch: amd64
+  tasks:
+    - name: test apt base root
+      plugin: apt
+      base_installroot: /tmp/test-root
+      packages:
+        - curl

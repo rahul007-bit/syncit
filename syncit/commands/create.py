@@ -462,8 +462,34 @@ def create_cmd(
         default=existing_arch if existing_arch in ("amd64", "arm64") else "amd64",
     ).ask()
 
+    # Base installroot prompt
+    has_base = any("base_installroot" in t for t in existing.get("spec", {}).get("tasks", []))
+    enable_base = questionary.confirm(
+        "Enable base_installroot for accurate dependency resolution? (apt/dnf tasks)",
+        default=has_base,
+    ).ask()
+    
+    base_root_path = ""
+    if enable_base:
+        existing_base = "/"
+        for t in existing.get("spec", {}).get("tasks", []):
+            if "base_installroot" in t:
+                existing_base = t["base_installroot"]
+                break
+        base_root_path = questionary.text(
+            "Base installroot path (e.g. / or /var/lib/minimal-root):",
+            default=existing_base
+        ).ask()
+
     # Carry forward existing tasks; new tasks appended in the loop below
     tasks: list = list(existing.get("spec", {}).get("tasks", []))
+    
+    # If the user chose NOT to enable base_installroot, we should strip it out 
+    # from any existing tasks (the "disable" part of the feature).
+    if not enable_base:
+        for t in tasks:
+            if "base_installroot" in t:
+                del t["base_installroot"]
 
     # ── Task loop ─────────────────────────────────────────────────────────
     while True:
@@ -492,18 +518,21 @@ def create_cmd(
         elif action == "Add empty task":
             task_name = questionary.text("Task name:").ask()
             if task_name:
-                tasks.append(
-                    {
-                        "name": task_name,
-                        "plugin": plugin_type,
-                        "packages": ["<package_name>"],
-                    }
-                )
+                t = {
+                    "name": task_name,
+                    "plugin": plugin_type,
+                    "packages": ["<package_name>"],
+                }
+                if plugin_type in ("apt", "dnf") and base_root_path:
+                    t["base_installroot"] = base_root_path
+                tasks.append(t)
                 rprint(f"[green]Task added:[/] {task_name}")
 
         elif action == "Create custom task":
             task = _create_custom_task(default_plugin=plugin_type)
             if task:
+                if task.get("plugin") in ("apt", "dnf") and base_root_path:
+                    task["base_installroot"] = base_root_path
                 tasks.append(task)
                 rprint(f"[green]Task added:[/] {task['name']}")
                 if questionary.confirm(
@@ -527,6 +556,12 @@ def create_cmd(
                 continue
 
             _add_subtasks(pkg_data, plugin_type, pkg_version, codename, tasks, catalog)
+            
+            # Inject base_installroot into any newly added subtasks if applicable
+            if base_root_path:
+                for t in tasks:
+                    if t.get("plugin") in ("apt", "dnf") and "base_installroot" not in t:
+                        t["base_installroot"] = base_root_path
 
     # ── Build and save manifest ───────────────────────────────────────────
     manifest = {

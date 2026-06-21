@@ -1,0 +1,48 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: test
+  version: 1.0.0
+spec:
+  targets:
+    distro: ubuntu
+    arch: amd64
+    codename: noble
+  tasks:
+  - name: Install Kubernetes
+    plugin: apt
+    repos:
+    - name: kubernetes
+      url: deb [signed-by=/etc/apt/keyrings/kubernetes.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /
+      gpg_key: https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key
+    packages:
+    - kubeadm=1.35.5-1.1
+    - kubelet=1.35.5-1.1
+    - kubectl=1.35.5-1.1
+  - name: Pull Kubernetes Control Plane Images
+    plugin: oci_image
+    images:
+    - registry.k8s.io/kube-apiserver:v1.35.5
+    - registry.k8s.io/kube-controller-manager:v1.35.5
+    - registry.k8s.io/kube-scheduler:v1.35.5
+    - registry.k8s.io/kube-proxy:v1.35.5
+    - registry.k8s.io/etcd:3.5.17-0
+    - registry.k8s.io/pause:3.10
+    - registry.k8s.io/coredns/coredns:v1.12.0
+  - name: test
+    plugin: apt
+    packages:
+    - sl
+    - htop
+  - name: Install PostgreSQL 15
+    plugin: apt
+    repos:
+    - name: pgdg
+      url: deb [signed-by=/etc/apt/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main
+      gpg_key: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    packages:
+    - postgresql-15
+  - name: Install PostgreSQL Client 15
+    plugin: apt
+    packages:
+    - postgresql-client-15

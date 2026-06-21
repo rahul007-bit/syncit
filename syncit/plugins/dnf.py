@@ -222,6 +222,18 @@ class DnfPlugin(OfflinePlugin):
                 dl_cmd.extend(["--installroot", str(installroot_path)])
                 if ctx.verbose:
                     print(f"[dnf] Resolving deps against installroot: {installroot_path}")
+                
+                # RHEL Subscription management fix: copy host entitlements to installroot
+                try:
+                    for pki_dir in ["/etc/pki/entitlement", "/etc/rhsm", "/etc/yum.repos.d"]:
+                        host_path = Path(pki_dir)
+                        if host_path.exists() and host_path.is_dir():
+                            ir_path = installroot_path / host_path.relative_to("/")
+                            ir_path.mkdir(parents=True, exist_ok=True)
+                            shutil.copytree(str(host_path), str(ir_path), dirs_exist_ok=True)
+                except Exception as e:
+                    if ctx.verbose:
+                        print(f"    [dnf] [dim]Note: Could not copy some host entitlements to installroot: {e}[/dim]")
             else:
                 if ctx.verbose:
                     print(
@@ -239,8 +251,35 @@ class DnfPlugin(OfflinePlugin):
 
             res = subprocess.run(dl_cmd, capture_output=True, text=True)
             if res.returncode != 0:
-                errors.append(f"[dnf] download failed: {res.stderr}")
-                return PluginResult(False, "Failed to download RPMs", artifacts, errors)
+                # If DNF fails to resolve dependencies and the target is RHEL, it's very likely
+                # the host is an unregistered RHEL machine with no access to BaseOS/AppStream.
+                stderr = res.stderr.strip()
+                target_distro = ctx.targets.get("distro", "")
+                
+                if target_distro.lower() in ("rhel", "redhat") and ("No package" in stderr or "nothing provides" in stderr or "Cannot download" in stderr):
+                    import sys
+                    if sys.stdout.isatty():
+                        import questionary
+                        err_console.print(f"\n[dnf] [bold red]Resolution Failed:[/] {stderr}")
+                        fallback_msg = (
+                            "It looks like DNF cannot find standard base OS packages. "
+                            "This frequently happens on unregistered RHEL machines because Red Hat blocks access to standard repositories.\n"
+                            "Would you like syncit to automatically use Rocky Linux's public open-source mirrors as a fallback for this download?"
+                        )
+                        if questionary.confirm(fallback_msg, default=False).ask():
+                            if ctx.verbose:
+                                print("[dnf] Retrying download with Rocky Linux public fallback repositories...")
+                            dl_cmd.extend([
+                                "--repofrompath", "syncit_fallback_baseos,https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/",
+                                "--repofrompath", "syncit_fallback_appstream,https://dl.rockylinux.org/pub/rocky/$releasever/AppStream/$basearch/os/",
+                                "--enablerepo", "syncit_fallback_baseos",
+                                "--enablerepo", "syncit_fallback_appstream"
+                            ])
+                            res = subprocess.run(dl_cmd, capture_output=True, text=True)
+
+                if res.returncode != 0:
+                    errors.append(f"[dnf] download failed: {res.stderr}")
+                    return PluginResult(False, "Failed to download RPMs", artifacts, errors)
 
             # Copy all resolved RPMs to the bundle.
             resolved_rpms = [

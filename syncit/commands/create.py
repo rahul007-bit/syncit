@@ -462,6 +462,14 @@ def create_cmd(
         default=existing_arch if existing_arch in ("amd64", "arm64") else "amd64",
     ).ask()
 
+    # DNF releasever prompt (stored as codename to reuse manifest structure)
+    if plugin_type == "dnf":
+        existing_releasever = targets.get("codename", "")
+        codename = questionary.text(
+            "Release version (e.g. 9 for Rocky 9, 8 for Alma 8):",
+            default=existing_releasever,
+        ).ask()
+
     # Base installroot prompt
     has_base = any("base_installroot" in t for t in existing.get("spec", {}).get("tasks", []))
     enable_base = questionary.confirm(
@@ -506,14 +514,20 @@ def create_cmd(
                             res = run_privileged(["debootstrap", cn, str(root_path)])
                             if res.returncode != 0:
                                 rprint(f"[red]debootstrap failed (is it installed?):[/] {res.stderr}")
+                                raise typer.Exit(1)
                     else:
                         if choice == "empty":
                             run_privileged(["mkdir", "-p", str(root_path)])
                         else:
-                            rprint(f"[dim]Running: dnf install --installroot {root_path} @core -y[/dim]")
-                            res = run_privileged(["dnf", "install", "--installroot", str(root_path), "@core", "-y"])
+                            dnf_init_cmd = ["dnf", "install", "--installroot", str(root_path), "@core", "-y"]
+                            if codename:
+                                dnf_init_cmd.extend(["--releasever", codename])
+                            
+                            rprint(f"[dim]Running: {' '.join(dnf_init_cmd)}[/dim]")
+                            res = run_privileged(dnf_init_cmd)
                             if res.returncode != 0:
                                 rprint(f"[red]dnf install failed:[/] {res.stderr}")
+                                raise typer.Exit(1)
                     rprint(f"[green]Successfully initialized {root_path}[/green]")
 
     # Carry forward existing tasks; new tasks appended in the loop below

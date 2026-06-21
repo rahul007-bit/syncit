@@ -95,6 +95,7 @@ def resolve_template(
         "{version}": version,
         "{major_minor}": major_minor,
         "{codename}": codename,
+        "{releasever}": codename,
     }
 
     def _replace(obj: Any) -> Any:

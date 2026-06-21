@@ -190,6 +190,7 @@ class OciImagePlugin(OfflinePlugin):
                     print(f"[oci_image] Bundling {source} from cache layout...")
                 # We use docker-archive format because oci-archive natively drops tags 
                 # when loaded manually with podman/docker load. docker-archive preserves them.
+                archive.unlink(missing_ok=True)
                 bundle_cmd = ["skopeo", "copy", f"oci:{cache_path}", f"docker-archive:{archive}:{source}"]
                 bundle_res = _run(bundle_cmd)
                 if bundle_res.returncode != 0:
@@ -212,6 +213,7 @@ class OciImagePlugin(OfflinePlugin):
                 else:
                     bundle_cmd = [pack_tool, "save", "-o", str(archive), source]
                     
+                archive.unlink(missing_ok=True)
                 bundle_res = _run(bundle_cmd)
                 if bundle_res.returncode != 0:
                     errors.append(f"[oci_image] Failed to bundle {source}: {bundle_res.stderr.strip()}")

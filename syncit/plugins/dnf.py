@@ -63,6 +63,9 @@ class DnfPlugin(OfflinePlugin):
         if "releasever" in task_spec and not isinstance(task_spec["releasever"], (str, int)):
             errors.append("[dnf] 'releasever' must be a string or integer (e.g. '9' or 9)")
 
+        if "arch" in task_spec and not isinstance(task_spec["arch"], str):
+            errors.append("[dnf] 'arch' must be a string (e.g. 'x86_64')")
+
         # Validate optional repos
         repos = task_spec.get("repos", [])
         if repos:
@@ -177,6 +180,14 @@ class DnfPlugin(OfflinePlugin):
         # behaviour, can over- or under-download).
         base_installroot = task_spec.get("base_installroot")
         releasever = task_spec.get("releasever")
+        arch = task_spec.get("arch")
+        if not arch and ctx.targets:
+            arch = ctx.targets.get("arch")
+
+        if arch == "amd64":
+            arch = "x86_64"
+        elif arch == "arm64":
+            arch = "aarch64"
 
         import tempfile
 
@@ -192,6 +203,8 @@ class DnfPlugin(OfflinePlugin):
                 "--destdir",
                 str(temp_dl_dir),
             ]
+            if arch:
+                dl_cmd.extend(["--arch", f"{arch},noarch"])
 
             # Custom repos are injected via --repofrompath with a 'syncit_' prefix
             # (e.g. syncit_kubernetes), so they never conflict with same-named system

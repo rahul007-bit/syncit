@@ -118,6 +118,11 @@ def run_pack(
             dry_run=dry_run,
             verbose=verbose,
             no_cache=no_cache,
+            targets={
+                "distro": targets.distro,
+                "codename": targets.codename,
+                "arch": targets.arch,
+            },
         )
 
         try:

@@ -84,6 +84,7 @@ class PackContext:
     dry_run: bool = False
     verbose: bool = False
     no_cache: bool = False
+    targets: dict[str, Any] | None = None
 
 
 @dataclass
@@ -94,6 +95,7 @@ class ApplyContext:
     dry_run: bool = False
     verbose: bool = False
     force: bool = False  # Re-apply even if state says already done
+    targets: dict[str, Any] | None = None
 
 
 @dataclass

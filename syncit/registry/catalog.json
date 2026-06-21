@@ -155,6 +155,13 @@
             "packages": [
               "postgresql{version}-server"
             ]
+          },
+          "dnf-amazonlinux": {
+            "name": "Install PostgreSQL (AL2023 native)",
+            "plugin": "dnf",
+            "packages": [
+              "postgresql15-server"
+            ]
           }
         }
       },
@@ -189,6 +196,13 @@
             "packages": [
               "postgresql{version}"
             ]
+          },
+          "dnf-amazonlinux": {
+            "name": "Install PostgreSQL Client (AL2023 native)",
+            "plugin": "dnf",
+            "packages": [
+              "postgresql15"
+            ]
           }
         }
       }
@@ -218,6 +232,13 @@
             "packages": [
               "podman"
             ]
+          },
+          "dnf-amazonlinux": {
+            "name": "Install Podman (Docker Fallback for AL2023)",
+            "plugin": "dnf",
+            "packages": [
+              "docker"
+            ]
           }
         }
       },
@@ -240,6 +261,11 @@
               "slirp4netns",
               "shadow-utils"
             ]
+          },
+          "dnf-amazonlinux": {
+            "name": "Install Podman Rootless Support (Skip on AL2023)",
+            "plugin": "dnf",
+            "packages": []
           }
         }
       }

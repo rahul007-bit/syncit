@@ -1,0 +1,28 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: nvidia-cuda
+  version: 12.6.0
+spec:
+  targets:
+    distro: ubuntu
+    codename: noble
+    arch: amd64
+  tasks:
+    - name: Install NVIDIA CUDA Toolkit
+      plugin: apt
+      repos:
+        - name: nvidia-cuda
+          url: deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /
+          gpg_key: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/3bf863cc.pub
+      packages:
+        - cuda-toolkit-12-6
+
+    - name: Install NVIDIA Open Kernel Drivers
+      plugin: apt
+      repos:
+        - name: nvidia-cuda
+          url: deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /
+          gpg_key: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/3bf863cc.pub
+      packages:
+        - nvidia-open

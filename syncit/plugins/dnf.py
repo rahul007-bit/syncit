@@ -232,9 +232,9 @@ class DnfPlugin(OfflinePlugin):
                 if ctx.verbose:
                     print(f"[dnf] Resolving deps against installroot: {installroot_path}")
                 
-                # RHEL Subscription management fix: copy host entitlements to installroot
+                # RHEL Subscription management fix: copy host entitlements & GPG keys to installroot
                 try:
-                    for pki_dir in ["/etc/pki/entitlement", "/etc/rhsm", "/etc/yum.repos.d"]:
+                    for pki_dir in ["/etc/pki/entitlement", "/etc/rhsm", "/etc/yum.repos.d", "/etc/pki/rpm-gpg"]:
                         host_path = Path(pki_dir)
                         if host_path.exists() and host_path.is_dir():
                             ir_path = installroot_path / host_path.relative_to("/")

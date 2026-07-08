@@ -24,6 +24,22 @@ from syncit.plugins.registry import registry
 err_console = Console(stderr=True)
 
 
+def _run_cmd(cmd: list[str], verbose: bool = False) -> subprocess.CompletedProcess:
+    if verbose:
+        print(f"    [dnf] Executing: {' '.join(cmd)}")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        output_lines = []
+        if process.stdout:
+            for line in process.stdout:
+                print(f"    {line}", end="", flush=True)
+                output_lines.append(line)
+        process.wait()
+        full_out = "".join(output_lines)
+        return subprocess.CompletedProcess(cmd, process.returncode, full_out, full_out)
+    else:
+        return subprocess.run(cmd, capture_output=True, text=True)
+
+
 class DnfPlugin(OfflinePlugin):
     name = "dnf"
 
@@ -258,7 +274,7 @@ class DnfPlugin(OfflinePlugin):
 
 
 
-            res = subprocess.run(dl_cmd, capture_output=True, text=True)
+            res = _run_cmd(dl_cmd, verbose=ctx.verbose)
             if res.returncode != 0:
                 # If DNF fails to resolve dependencies and the target is RHEL, it's very likely
                 # the host is an unregistered RHEL machine with no access to BaseOS/AppStream.
@@ -284,7 +300,7 @@ class DnfPlugin(OfflinePlugin):
                                 "--enablerepo", "syncit_fallback_baseos",
                                 "--enablerepo", "syncit_fallback_appstream"
                             ])
-                            res = subprocess.run(dl_cmd, capture_output=True, text=True)
+                            res = _run_cmd(dl_cmd, verbose=ctx.verbose)
 
                 if res.returncode != 0:
                     errors.append(f"[dnf] download failed: {res.stderr}")
@@ -300,11 +316,9 @@ class DnfPlugin(OfflinePlugin):
             for f in resolved_rpms:
                 shutil.copy2(f, rpm_dir / f.name)
 
-        res2 = subprocess.run(
-            ["createrepo_c", str(rpm_dir)],
-            capture_output=True,
-            text=True,
-        )
+        if ctx.verbose:
+            print(f"[dnf] Creating repository metadata with createrepo_c...")
+        res2 = _run_cmd(["createrepo_c", str(rpm_dir)], verbose=ctx.verbose)
         if res2.returncode != 0:
             errors.append(f"[dnf] createrepo_c failed: {res2.stderr}")
             return PluginResult(False, "Failed to create repo", artifacts, errors)
@@ -354,10 +368,9 @@ class DnfPlugin(OfflinePlugin):
             shutil.copytree(bundled_rpms, dest_rpm, dirs_exist_ok=True)
             artifacts.append(str(dest_rpm))
 
-            res = subprocess.run(
+            res = _run_cmd(
                 ["createrepo_c", str(dest_rpm)],
-                capture_output=True,
-                text=True,
+                verbose=getattr(ctx, "verbose", False),
             )
             if res.returncode != 0:
                 raise Exception(f"createrepo_c failed: {res.stderr}")
@@ -373,10 +386,9 @@ class DnfPlugin(OfflinePlugin):
             repo_path.write_text(repo_content)
             artifacts.append(str(repo_path))
 
-            res_inst = subprocess.run(
+            res_inst = _run_cmd(
                 ["dnf", "install", "-y", "--disablerepo=*", f"--enablerepo=syncit-{slug}"] + packages,
-                capture_output=True,
-                text=True,
+                verbose=getattr(ctx, "verbose", False),
             )
             if res_inst.returncode != 0:
                 raise Exception(f"dnf install failed: {res_inst.stderr}")

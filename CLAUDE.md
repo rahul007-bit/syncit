@@ -83,3 +83,27 @@ State is tracked in `/opt/syncit/state.json` (configurable) to ensure idempotent
 - Some `datetime.UTC` usages may cause import errors on Python < 3.11
 - Tests use `unittest.mock.patch` extensively; when patching `ThreadPoolExecutor` or `as_completed` inside `exec_cmd.py`, patch at `syncit.commands.exec_cmd.ThreadPoolExecutor`
 - When testing commands via `CliRunner`, subprocess calls inside command modules may need patching at the module-level path (e.g., `syncit.commands.exec_cmd.subprocess`)
+
+## Using Graphify and Agents
+
+### Graphify (`/graphify`)
+- Turn any folder into a navigable knowledge graph.
+- Run `/graphify` in the project root to generate interactive HTML report, JSON, and optionally an Obsidian vault.
+- Use `/graphify query "<question>"` to ask questions about the codebase using the generated graph.
+- Use `/graphify explain "<concept>"` to get a plain-language explanation of a node.
+- Use `/graphify path "<nodeA>" "<nodeB>"` to find shortest path between concepts.
+- See `graphify-out/GRAPH_REPORT.md` for generated report.
+
+### Built-in Agents (via `/agent` or Skill)
+- `caveman:cavecrew-builder`: For small, surgical edits (1-2 files).
+- `caveman:cavecrew-investigator`: Read-only search for definitions, usages, etc.
+- `caveman:cavecrew-reviewer`: Diff/branch/file reviewer with severity tags.
+- `general-purpose`: Default agent for complex research and multi-step tasks.
+- `Plan`: For designing implementation strategies.
+- Explore: For broad fan-out searches when you only need conclusions.
+
+### Using Skills
+- Invoke a skill with `/<skill-name>` or via the Skill tool.
+- Example: `/graphify` triggers the graphify skill.
+- See available skills in the system reminders.
+

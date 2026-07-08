@@ -1,0 +1,24 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: uptrace
+  version: 1.0.0
+spec:
+  targets:
+    distro: ubuntu
+    arch: amd64
+    codename: noble
+  tasks:
+  - name: uptrace images
+    plugin: oci_image
+    images:
+    - postgres:17-alpine
+    - clickhouse/clickhouse-server:26.3
+    - redis:6.2.2-alpine
+    - uptrace/uptrace:2.1.0-beta.5
+    - otel/opentelemetry-collector-contrib:0.123.0
+    - axllent/mailpit
+    - timberio/vector:0.28.X-alpine
+    - grafana/grafana:12.0.0
+    - prom/prometheus:v2.36.2
+    - quay.io/prometheus/node-exporter:latest

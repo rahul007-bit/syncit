@@ -26,3 +26,19 @@ spec:
           gpg_key: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/3bf863cc.pub
       packages:
         - nvidia-open
+        - linux-image-generic
+        - linux-headers-generic
+        - linux-modules-extra-generic
+        - build-essential
+
+    - name: Install NVIDIA Container Toolkit
+      plugin: apt
+      repos:
+        - name: nvidia-container
+          url: deb https://nvidia.github.io/libnvidia-container/stable/deb/amd64 /
+          gpg_key: https://nvidia.github.io/libnvidia-container/gpgkey
+      packages:
+        - nvidia-container-toolkit
+        - nvidia-container-toolkit-base
+        - libnvidia-container-tools
+        - libnvidia-container1

@@ -1,0 +1,25 @@
+apiVersion: syncit/v1
+kind: Bundle
+metadata:
+  name: postgresql17-devel
+  version: 1.0.0
+spec:
+  targets:
+    distro: rocky
+    codename: "9"
+    arch: amd64
+  tasks:
+    - name: Install PostgreSQL 17 Devel
+      plugin: dnf
+      repos:
+        - name: pgdg17
+          baseurl: https://download.postgresql.org/pub/repos/yum/17/redhat/rhel-$releasever-$basearch
+          gpgkey: https://download.postgresql.org/pub/repos/yum/RPM-GPG-KEY-PGDG
+        - name: epel9
+          baseurl: https://dl.fedoraproject.org/pub/epel/$releasever/Everything/$basearch/
+          gpgkey: https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-$releasever
+        - name: crb9
+          baseurl: https://dl.rockylinux.org/pub/rocky/$releasever/CRB/$basearch/os/
+          gpgkey: https://dl.rockylinux.org/pub/rocky/RPM-GPG-KEY-Rocky-$releasever
+      packages:
+        - postgresql17-devel

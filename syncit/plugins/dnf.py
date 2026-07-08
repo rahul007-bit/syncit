@@ -135,12 +135,17 @@ class DnfPlugin(OfflinePlugin):
         # Cache directory (used by DNF via --setopt=cachedir for network efficiency)
         cache_dir = Path("~/.cache/syncit/dnf").expanduser()
         cache_dir.mkdir(parents=True, exist_ok=True)
+        # RPM package file cache (stores verified .rpm files across runs)
+        rpm_cache_dir = Path("~/.cache/syncit/dnf-rpms").expanduser()
+        rpm_cache_dir.mkdir(parents=True, exist_ok=True)
 
         if ctx.no_cache:
             if ctx.verbose:
-                print(f"[dnf] --no-cache: clearing local cache at {cache_dir}...")
+                print(f"[dnf] --no-cache: clearing local cache at {cache_dir} and {rpm_cache_dir}...")
             shutil.rmtree(cache_dir, ignore_errors=True)
+            shutil.rmtree(rpm_cache_dir, ignore_errors=True)
             cache_dir.mkdir(parents=True, exist_ok=True)
+            rpm_cache_dir.mkdir(parents=True, exist_ok=True)
 
         # ── Phase 0: Process upstream repos ─────────────────────────────────
         extra_repo_opts: list[str] = []
@@ -272,7 +277,44 @@ class DnfPlugin(OfflinePlugin):
             dl_cmd.extend(extra_repo_opts)
             dl_cmd.extend(packages)
 
+            # ── Phase 1.5: Check local RPM file cache (~/.cache/syncit/dnf-rpms) ──
+            if not ctx.no_cache:
+                url_cmd = [arg for arg in dl_cmd if arg != "--destdir" and arg != str(temp_dl_dir)] + ["--url"]
+                if ctx.verbose:
+                    print("[dnf] Checking package URLs for local cache matching...")
+                url_res = subprocess.run(url_cmd, capture_output=True, text=True)
+                if url_res.returncode == 0:
+                    cached_count = 0
+                    for line in url_res.stdout.splitlines():
+                        line = line.strip()
+                        if any(line.startswith(scheme) for scheme in ("http://", "https://", "ftp://", "file://")):
+                            filename = line.split("/")[-1].split("?")[0]
+                            cached_file = rpm_cache_dir / filename
+                            if cached_file.exists():
+                                # Layer 2: RPM integrity check (rpm -K / rpm -qp)
+                                is_valid = False
+                                try:
+                                    check_res = subprocess.run(
+                                        ["rpm", "-K", "--quiet", str(cached_file)],
+                                        capture_output=True,
+                                    )
+                                    if check_res.returncode == 0:
+                                        is_valid = True
+                                except Exception:
+                                    if cached_file.stat().st_size > 0:
+                                        is_valid = True
 
+                                if is_valid:
+                                    if ctx.verbose and cached_count < 10:
+                                        print(f"    [dnf] [dim]Using cached: {filename}[/dim]")
+                                    shutil.copy2(str(cached_file), str(temp_dl_dir / filename))
+                                    cached_count += 1
+                                else:
+                                    if ctx.verbose:
+                                        print(f"    [dnf] [yellow]Removing invalid/corrupted cache entry: {filename}[/yellow]")
+                                    cached_file.unlink(missing_ok=True)
+                    if ctx.verbose and cached_count > 0:
+                        print(f"[dnf] Reusing {cached_count} verified RPM(s) from local cache ({rpm_cache_dir})")
 
             res = _run_cmd(dl_cmd, verbose=ctx.verbose)
             if res.returncode != 0:
@@ -314,6 +356,17 @@ class DnfPlugin(OfflinePlugin):
             if ctx.verbose:
                 print(f"[dnf] Downloaded/resolved {len(resolved_rpms)} RPM(s) to bundle.")
             for f in resolved_rpms:
+                # Layer 1: Promote successfully downloaded RPMs to permanent cache atomically
+                cache_target = rpm_cache_dir / f.name
+                if not ctx.no_cache and (not cache_target.exists() or cache_target.stat().st_size != f.stat().st_size):
+                    try:
+                        tmp_cache = cache_target.with_suffix(".rpm.tmp")
+                        shutil.copy2(str(f), str(tmp_cache))
+                        tmp_cache.rename(cache_target)
+                    except Exception as exc:
+                        if ctx.verbose:
+                            print(f"    [dnf] [dim]Warning: Could not cache {f.name}: {exc}[/dim]")
+
                 shutil.copy2(f, rpm_dir / f.name)
 
         if ctx.verbose:

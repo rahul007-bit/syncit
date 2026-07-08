@@ -22,12 +22,18 @@ def pack_ctx(tmp_bundle_dir: Path, fixture_dir: Path) -> PackContext:
         bundle_dir=tmp_bundle_dir,
         manifest_dir=fixture_dir,  # manifest_dir so relative paths resolve
         dry_run=False,
+        task_slug="pip",
     )
 
 
 @pytest.fixture
 def apply_ctx(tmp_bundle_dir: Path, tmp_state_file: Path) -> ApplyContext:
-    return ApplyContext(bundle_dir=tmp_bundle_dir, state_file=tmp_state_file, dry_run=False)
+    return ApplyContext(
+        bundle_dir=tmp_bundle_dir,
+        state_file=tmp_state_file,
+        dry_run=False,
+        task_slug="pip",
+    )
 
 
 # --------------------------------------------------------------------------- #

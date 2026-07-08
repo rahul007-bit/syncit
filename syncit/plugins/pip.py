@@ -66,6 +66,8 @@ class PipPlugin(OfflinePlugin):
                 errors=["Only requirements.txt is supported in Phase 1"],
             )
 
+        python_version = task_spec.get("python_version", f"{sys.version_info.major}.{sys.version_info.minor}")
+
         slug = ctx.task_slug or "default"
         wheel_dir = ctx.bundle_dir / slug
 

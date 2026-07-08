@@ -51,9 +51,10 @@ def test_pack_dry_run(bundle_yaml: Path, tmp_path: Path) -> None:
     out_dir = tmp_path / "bundles"
     # Ensure syncit/plugins/oci_image._has_cmd returns True to pass validation step if it executes it
     with patch("syncit.plugins.oci_image._has_cmd", return_value=True):
-        result = runner.invoke(
-            app, ["pack", str(bundle_yaml), "--output", str(out_dir), "--dry-run"]
-        )
+        with patch("shutil.which", return_value="fake_path"):
+            result = runner.invoke(
+                app, ["pack", str(bundle_yaml), "--output", str(out_dir), "--dry-run"]
+            )
     assert result.exit_code == 0
     assert "dry-run mode" in result.stdout
     assert "Would write bundle to:" in result.stdout

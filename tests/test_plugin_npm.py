@@ -25,7 +25,7 @@ def test_npm_validate() -> None:
 def test_npm_pack(tmp_path: Path) -> None:
     plugin = NpmPlugin()
     bundle_dir = tmp_path / "bundle"
-    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path)
+    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="npm")
 
     proj_dir = tmp_path / "proj"
     proj_dir.mkdir()
@@ -56,7 +56,7 @@ def test_npm_apply(tmp_path: Path) -> None:
     bundled_nm.mkdir(parents=True)
     (bundled_nm / "fake").touch()
 
-    ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json")
+    ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json", task_slug="npm")
 
     proj_dir = tmp_path / "proj"
     spec = {"projects": [{"project_name": "app", "project_dir": str(proj_dir)}]}

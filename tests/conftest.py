@@ -35,3 +35,8 @@ def tmp_bundle_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def tmp_state_file(tmp_path: Path) -> Path:
     return tmp_path / "state.json"
+
+
+@pytest.fixture(autouse=True)
+def mock_sudo_password(monkeypatch) -> None:
+    monkeypatch.setattr("syncit.plugins.base.get_sudo_password", lambda: "dummy")

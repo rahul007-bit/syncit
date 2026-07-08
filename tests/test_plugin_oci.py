@@ -19,16 +19,16 @@ def plugin() -> OciImagePlugin:
 
 @pytest.fixture
 def pack_ctx(tmp_bundle_dir: Path) -> PackContext:
-    return PackContext(bundle_dir=tmp_bundle_dir, manifest_dir=tmp_bundle_dir, dry_run=False)
+    return PackContext(bundle_dir=tmp_bundle_dir, manifest_dir=tmp_bundle_dir, dry_run=False, task_slug="images")
 
 
 @pytest.fixture
 def apply_ctx(tmp_bundle_dir: Path, tmp_state_file: Path) -> ApplyContext:
-    return ApplyContext(bundle_dir=tmp_bundle_dir, state_file=tmp_state_file, dry_run=False)
+    return ApplyContext(bundle_dir=tmp_bundle_dir, state_file=tmp_state_file, dry_run=False, task_slug="images")
 
 
 SAMPLE_IMAGES = [
-    {"source": "alpine:latest"},
+    {"source": "docker.io/library/alpine:latest"},
     {"source": "docker.io/library/postgres:16-alpine"},
 ]
 
@@ -118,7 +118,7 @@ class TestOciPack:
         assert manifest_file.exists()
         data = json.loads(manifest_file.read_text())
         assert len(data) == 2
-        assert data[0]["source"] == "alpine:latest"
+        assert data[0]["source"] == "docker.io/library/alpine:latest"
 
     def test_pack_skopeo_failure_recorded_in_errors(
         self, plugin: OciImagePlugin, pack_ctx: PackContext
@@ -143,7 +143,7 @@ class TestOciApply:
         images_dir = bundle_dir / "images"
         images_dir.mkdir(parents=True)
         manifest = [
-            {"source": "alpine:latest", "archive": "alpine_latest.tar", "digest": "sha256:abc"},
+            {"source": "docker.io/library/alpine:latest", "archive": "alpine_latest.tar", "digest": "sha256:abc"},
         ]
         (images_dir / "manifest.json").write_text(json.dumps(manifest))
         (images_dir / "alpine_latest.tar").write_bytes(b"fake tar")
@@ -152,7 +152,7 @@ class TestOciApply:
         self._setup_bundle(apply_ctx.bundle_dir)
         apply_ctx.dry_run = True
         with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
-            result = plugin.apply({"images": [{"source": "alpine:latest"}]}, apply_ctx)
+            result = plugin.apply({"images": [{"source": "docker.io/library/alpine:latest"}]}, apply_ctx)
         assert result.success is True
         assert "dry-run" in result.message.lower()
 
@@ -178,7 +178,7 @@ class TestOciApply:
 
         with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
             with patch("syncit.plugins.oci_image._run", return_value=mock_ok):
-                with patch.object(plugin, "_image_exists", return_value=False):
+                with patch.object(plugin, "_image_exists", side_effect=[False, True]):
                     result = plugin.apply({}, apply_ctx)
 
         assert result.success is True
@@ -196,7 +196,7 @@ class TestOciApply:
 
         with patch("syncit.plugins.oci_image._detect_runtime", return_value="podman"):
             with patch("syncit.plugins.oci_image._run", side_effect=capture_run):
-                with patch.object(plugin, "_image_exists", return_value=False):
+                with patch.object(plugin, "_image_exists", side_effect=[False, True]):
                     plugin.apply({}, apply_ctx)
 
         assert any("podman" in cmd[0] for cmd in captured_cmds)
@@ -226,24 +226,24 @@ class TestOciApply:
 class TestOciDiff:
     def test_diff_new_task_marks_all_added(self, plugin: OciImagePlugin) -> None:
         result = plugin.diff(None, {"images": SAMPLE_IMAGES})
-        assert set(result.added) == {"alpine:latest", "docker.io/library/postgres:16-alpine"}
+        assert set(result.added) == {"docker.io/library/alpine:latest", "docker.io/library/postgres:16-alpine"}
         assert result.removed == []
 
     def test_diff_added_image(self, plugin: OciImagePlugin) -> None:
         result = plugin.diff(
-            {"images": [{"source": "alpine:latest"}]},
+            {"images": [{"source": "docker.io/library/alpine:latest"}]},
             {"images": SAMPLE_IMAGES},
         )
         assert "docker.io/library/postgres:16-alpine" in result.added
-        assert "alpine:latest" in result.unchanged
+        assert "docker.io/library/alpine:latest" in result.unchanged
 
     def test_diff_removed_image(self, plugin: OciImagePlugin) -> None:
         result = plugin.diff(
             {"images": SAMPLE_IMAGES},
-            {"images": [{"source": "alpine:latest"}]},
+            {"images": [{"source": "docker.io/library/alpine:latest"}]},
         )
         assert "docker.io/library/postgres:16-alpine" in result.removed
-        assert "alpine:latest" in result.unchanged
+        assert "docker.io/library/alpine:latest" in result.unchanged
 
     def test_diff_no_changes(self, plugin: OciImagePlugin) -> None:
         spec = {"images": SAMPLE_IMAGES}

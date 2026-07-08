@@ -21,7 +21,7 @@ def test_cargo_validate() -> None:
 def test_cargo_pack(tmp_path: Path) -> None:
     plugin = CargoPlugin()
     bundle_dir = tmp_path / "bundle"
-    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path)
+    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="cargo")
 
     proj_dir = tmp_path / "proj"
     proj_dir.mkdir()
@@ -55,7 +55,7 @@ def test_cargo_apply(tmp_path: Path) -> None:
     (vendor_src / "crate").touch()
     (target_dir / "config.toml.snippet").write_text("[snippet]")
 
-    ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json")
+    ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json", task_slug="cargo")
 
     proj_dir = tmp_path / "proj"
     spec = {"projects": [{"project_name": "app", "project_dir": str(proj_dir)}]}

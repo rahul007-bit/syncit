@@ -21,7 +21,7 @@ def test_go_validate() -> None:
 def test_go_pack(tmp_path: Path) -> None:
     plugin = GoPlugin()
     bundle_dir = tmp_path / "bundle"
-    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path)
+    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="go")
 
     proj_dir = tmp_path / "proj"
     proj_dir.mkdir()
@@ -50,7 +50,7 @@ def test_go_apply(tmp_path: Path, monkeypatch) -> None:
     modcache_src.mkdir(parents=True)
     (modcache_src / "download").touch()
 
-    ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json")
+    ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json", task_slug="go")
     spec = {"projects": [{"project_name": "app", "project_dir": str(tmp_path)}]}
 
     # Mock system paths for testing locally without root

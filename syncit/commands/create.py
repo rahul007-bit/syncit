@@ -20,6 +20,7 @@ from syncit.commands.pack import run_pack
 from syncit.commands.up import run_up
 from syncit.wizard import catalog as repo_catalog
 from syncit.wizard import host_repos
+from syncit.wizard.apt_browser import browse_apt_packages
 from syncit.wizard.rpm_browser import browse_dnf_packages, check_repo_url
 
 console = Console()
@@ -409,7 +410,11 @@ def _prompt_upstream_repos(
 
         if action.startswith("Browse"):
             catalog_entries = repo_catalog.load_repos(distro_id)
-            host_entries = host_repos.load_host_repos()
+            host_entries = (
+                host_repos.load_host_apt_repos()
+                if plugin == "apt"
+                else host_repos.load_host_repos()
+            )
             entries = catalog_entries + host_entries
             if not entries:
                 rprint(
@@ -483,7 +488,8 @@ def _prompt_upstream_repos(
                     if _probe_repo(rendered, plugin, releasever, arch):
                         repos.append(rendered)
                         rprint(f"[green]Repo added:[/] {rendered.get('name', '')}")
-                        rprint(f"[dim]  {rendered.get('baseurl', '')}[/dim]")
+                        shown = rendered.get("baseurl") or rendered.get("url", "")
+                        rprint(f"[dim]  {shown}[/dim]")
             continue
         else:  # Add custom repo
             name = questionary.text("Repo name (short key):").ask()
@@ -558,6 +564,39 @@ def _prompt_apt_dnf_task(
                 repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64"),
                 installroot=installroot or None,
                 add_repos=lambda: _prompt_upstream_repos("dnf", distro_id, releasever, arch),
+            )
+        elif (
+            not live_ok
+            and questionary.select(
+                "How to add packages?",
+                choices=["Enter manually", "Cancel"],
+                default="Enter manually",
+            ).ask()
+            != "Enter manually"
+        ):
+            browsed = True
+            packages = []
+    elif plugin == "apt":
+        live_ok = shutil.which("apt-get") is not None
+        if (
+            live_ok
+            and questionary.confirm(
+                "Browse & select packages live via apt? (No = enter manually)", default=True
+            ).ask()
+        ):
+            browsed = True
+            installroot = (
+                base_root if (base_root and _apt_root_populated(Path(base_root))) else None
+            )
+            if base_root and not installroot:
+                rprint(
+                    "[dim]base_installroot not populated — resolving deps against build host instead.[/dim]"
+                )
+            packages = browse_apt_packages(
+                repos,
+                codename=releasever,
+                installroot=installroot or None,
+                add_repos=lambda: _prompt_upstream_repos("apt", distro_id, releasever, arch),
             )
         elif (
             not live_ok

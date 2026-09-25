@@ -276,6 +276,46 @@ def test_load_host_repos_parses_repo_files(tmp_path):
     assert entries[0]["label"] == "[host] my-el9"
 
 
+# ── Apt browser helpers ──────────────────────────────────────────────────
+
+
+def test_inject_trusted_variants():
+    from syncit.wizard.apt_browser import _inject_trusted
+
+    assert (
+        _inject_trusted("deb https://x/ubuntu noble main")
+        == "deb [trusted=yes] https://x/ubuntu noble main"
+    )
+    line = _inject_trusted("deb https://x/ubuntu noble main", "/tmp/k.gpg")
+    assert line.startswith("deb [trusted=yes signed-by=/tmp/k.gpg]")
+    line2 = _inject_trusted("deb [arch=amd64] https://x noble main", "/tmp/k.gpg")
+    assert line2.startswith("deb [trusted=yes signed-by=/tmp/k.gpg arch=amd64]")
+
+
+def test_load_host_apt_repos_deb822(tmp_path):
+    from syncit.wizard import host_repos as hr
+
+    (tmp_path / "extra.sources").write_text(
+        "Types: deb\n"
+        "URIs: https://apt.example.com\n"
+        "Suites: noble\n"
+        "Components: main universe\n"
+        "Signed-By: /usr/share/keyrings/x.gpg\n"
+        "Enabled: yes\n"
+        "\n"
+        "Types: deb\n"
+        "URIs: https://disabled.example.com\n"
+        "Suites: noble\n"
+        "Components: main\n"
+        "Enabled: no\n"
+    )
+    entries = hr.load_host_apt_repos(sources_dir=tmp_path, sources_list=tmp_path / "none")
+    assert len(entries) == 1
+    assert entries[0]["repo"]["url"] == "deb https://apt.example.com noble main universe"
+    # local keyring paths are NOT carried as gpg_key (trusted=yes covers pack)
+    assert "gpg_key" not in entries[0]["repo"]
+
+
 def test_load_host_repos_missing_dir(tmp_path):
     from syncit.wizard import host_repos as hr
 

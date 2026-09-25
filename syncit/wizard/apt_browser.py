@@ -8,6 +8,7 @@ repo config. Returns "name=version" pins that pack downloads and installs.
 
 from __future__ import annotations
 
+import atexit
 import re
 import shutil
 import subprocess
@@ -22,6 +23,22 @@ APT_CACHE_ROOT = Path("~/.cache/syncit/wizard-apt").expanduser()
 
 # Matches "<name>_<version>_<arch>.deb" filenames from --print-uris output
 _DEB_FILENAME_RE = re.compile(r"^([^_]+)_([^_]+)_[^.]+\.deb$")
+
+# Session-scoped temp sources dir — created on first warm, reused by every
+# apt-cache/apt-get call in this process, cleaned up at exit.
+_SESSION: dict[str, Any] = {}
+atexit.register(
+    lambda: (
+        shutil.rmtree(_SESSION["sources"], ignore_errors=True) if _SESSION.get("sources") else None
+    )
+)
+
+
+def _session_sources(repos: list[dict]) -> Path:
+    """Return (creating on first use) this session's temp sources dir."""
+    if not _SESSION.get("sources"):
+        _SESSION["sources"] = _build_temp_sources(repos)
+    return _SESSION["sources"]
 
 
 def _inject_trusted(source_line: str, signed_by: str | None = None) -> str:
@@ -150,40 +167,43 @@ def warm_apt_metadata(repos: list[dict], installroot: str | None = None) -> bool
     """Refresh user-space apt metadata for the selected repos with live progress."""
     if not shutil.which("apt-get"):
         return False
-    temp = _build_temp_sources(repos)
+    temp = _session_sources(repos)
+    status = None
+    if installroot:
+        sf = Path(installroot) / "var" / "lib" / "dpkg" / "status"
+        if sf.is_file():
+            status = str(sf)
+    cmd = ["apt-get", "update", *_base_opts(APT_CACHE_ROOT), *_source_opts(temp)]
+    if status:
+        cmd.extend(_status_opts(status))
+    rprint(
+        "[cyan]Downloading apt metadata (first run per repo set — later searches are instant)...[/cyan]"
+    )
     try:
-        status = None
-        if installroot:
-            sf = Path(installroot) / "var" / "lib" / "dpkg" / "status"
-            if sf.is_file():
-                status = str(sf)
-        cmd = ["apt-get", "update", *_base_opts(APT_CACHE_ROOT), *_source_opts(temp)]
-        if status:
-            cmd.extend(_status_opts(status))
+        rc = _run_streaming(cmd)
+    except subprocess.TimeoutExpired:
+        rprint("[yellow]Metadata download timed out — continuing with partial cache.[/yellow]")
+        return False
+    if rc != 0:
         rprint(
-            "[cyan]Downloading apt metadata (first run per repo set — later searches are instant)...[/cyan]"
+            "[yellow]Metadata fetch had errors — some repos may be unavailable. Trying anyway.[/yellow]"
         )
-        try:
-            rc = _run_streaming(cmd)
-        except subprocess.TimeoutExpired:
-            rprint("[yellow]Metadata download timed out — continuing with partial cache.[/yellow]")
-            return False
-        if rc != 0:
-            rprint(
-                "[yellow]Metadata fetch had errors — some repos may be unavailable. Trying anyway.[/yellow]"
-            )
-            return False
-        rprint("[green]Apt metadata ready.[/green]")
-        return True
-    finally:
-        shutil.rmtree(temp, ignore_errors=True)
+        return False
+    rprint("[green]Apt metadata ready.[/green]")
+    return True
 
 
 def search_packages(term: str, limit: int = 200) -> list[tuple[str, str]]:
     """Search packages across wizard repos + host sources. Returns [(name, summary)]."""
     term = term.strip()
     rprint(f"[cyan]Searching apt for '{term}'... (Ctrl-C to cancel)[/cyan]")
-    cmd = ["apt-cache", "search", term, *_base_opts(APT_CACHE_ROOT)]
+    cmd = [
+        "apt-cache",
+        "search",
+        term,
+        *_base_opts(APT_CACHE_ROOT),
+        *_source_opts(_session_sources([])),
+    ]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     out: list[tuple[str, str]] = []
     for line in res.stdout.splitlines():
@@ -209,7 +229,13 @@ def list_versions(name: str) -> list[str]:
     from syncit.wizard.rpm_browser import _vkey
 
     res = subprocess.run(
-        ["apt-cache", "madison", name, *_base_opts(APT_CACHE_ROOT)],
+        [
+            "apt-cache",
+            "madison",
+            name,
+            *_base_opts(APT_CACHE_ROOT),
+            *_source_opts(_session_sources([])),
+        ],
         capture_output=True,
         text=True,
         timeout=120,
@@ -241,6 +267,7 @@ def resolve_download_set(
         "--no-install-recommends",
         "-y",
         *_base_opts(APT_CACHE_ROOT),
+        *_source_opts(_session_sources([])),
     ]
     if installroot:
         sf = Path(installroot) / "var" / "lib" / "dpkg" / "status"

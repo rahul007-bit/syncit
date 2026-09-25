@@ -416,28 +416,27 @@ def _ensure_base_root(base_root_path: str, plugin_type: str, codename: str) -> s
     return base_root_path
 
 
+def _task_label(task: dict) -> str:
+    """Single task label: 'k8s(6 pkgs)' / 'images(2 imgs)' / 'pip(reqs.txt)'."""
+    plugin = task.get("plugin", "?")
+    name = task.get("name", "?")
+    if plugin in ("apt", "dnf"):
+        return f"{name}({len(task.get('packages', []))} pkgs)"
+    if plugin == "pip":
+        req = task.get("requirements")
+        return f"{name}({Path(req).name})" if req else f"{name}({len(task.get('packages', []))} py)"
+    if plugin == "oci_image":
+        return f"{name}({len(task.get('images', []))} imgs)"
+    if plugin == "file":
+        return f"{name}({len(task.get('files', []))} files)"
+    return name
+
+
 def _task_summary(tasks: list) -> str:
-    """One-line state: 'k8s(6 pkgs) · images(2 imgs) · pip(reqs.txt)'."""
+    """One-line state: '2 tasks: k8s(6 pkgs) · images(2 imgs)'."""
     if not tasks:
         return "no tasks yet"
-    parts: list[str] = []
-    for t in tasks:
-        plugin = t.get("plugin", "?")
-        name = t.get("name", "?")
-        if plugin in ("apt", "dnf"):
-            parts.append(f"{name}({len(t.get('packages', []))} pkgs)")
-        elif plugin == "pip":
-            req = t.get("requirements")
-            parts.append(
-                f"{name}({Path(req).name})" if req else f"{name}({len(t.get('packages', []))} py)"
-            )
-        elif plugin == "oci_image":
-            parts.append(f"{name}({len(t.get('images', []))} imgs)")
-        elif plugin == "file":
-            parts.append(f"{name}({len(t.get('files', []))} files)")
-        else:
-            parts.append(name)
-    return f"{len(tasks)} tasks: " + " · ".join(parts)
+    return f"{len(tasks)} tasks: " + " · ".join(_task_label(t) for t in tasks)
 
 
 def _finalize_task(task: dict, tasks: list, base_root_path: str, plugin_type: str) -> None:
@@ -455,7 +454,7 @@ def _edit_task(task: dict, distro_id: str, releasever: str, arch: str, base_root
     from syncit.wizard import history as wiz_history
 
     while True:
-        rprint(f"\n[cyan]Editing: {_task_summary([task])}[/cyan]")
+        rprint(f"\n[cyan]Editing: {_task_label(task)}[/cyan]")
         plugin = task.get("plugin", "?")
         choices: list[questionary.Choice] = [
             questionary.Choice(title="Rename task", value="rename")
@@ -571,7 +570,7 @@ def _review_tasks(
         if not tasks:
             rprint("[yellow]No tasks in this bundle.[/yellow]")
         for i, t in enumerate(tasks, 1):
-            rprint(f"  [cyan]{i}.[/cyan] {_task_summary([t])}")
+            rprint(f"  [cyan]{i}.[/cyan] {_task_label(t)}")
         action = questionary.select(
             "Review:",
             choices=[
@@ -593,8 +592,7 @@ def _review_tasks(
             idx = questionary.select(
                 "Edit which task?",
                 choices=[
-                    questionary.Choice(title=_task_summary([t]), value=i)
-                    for i, t in enumerate(tasks)
+                    questionary.Choice(title=_task_label(t), value=i) for i, t in enumerate(tasks)
                 ]
                 + [questionary.Choice(title="Back", value=-1)],
             ).ask()
@@ -604,8 +602,7 @@ def _review_tasks(
             idx = questionary.select(
                 "Remove which task?",
                 choices=[
-                    questionary.Choice(title=_task_summary([t]), value=i)
-                    for i, t in enumerate(tasks)
+                    questionary.Choice(title=_task_label(t), value=i) for i, t in enumerate(tasks)
                 ]
                 + [questionary.Choice(title="Back", value=-1)],
             ).ask()
@@ -616,8 +613,7 @@ def _review_tasks(
             idx = questionary.select(
                 "Move which task?",
                 choices=[
-                    questionary.Choice(title=_task_summary([t]), value=i)
-                    for i, t in enumerate(tasks)
+                    questionary.Choice(title=_task_label(t), value=i) for i, t in enumerate(tasks)
                 ]
                 + [questionary.Choice(title="Back", value=-1)],
             ).ask()
@@ -1527,7 +1523,7 @@ def create_cmd(
                     doomed = questionary.select(
                         "Remove which task?",
                         choices=[
-                            questionary.Choice(title=_task_summary([t]), value=i)
+                            questionary.Choice(title=_task_label(t), value=i)
                             for i, t in enumerate(tasks)
                         ]
                         + [questionary.Choice(title="Back", value=-1)],

@@ -276,26 +276,63 @@ def _apt_root_populated(root_path: Path) -> bool:
     return status.is_file() and status.stat().st_size > 0
 
 
-def _populate_base_root(root_path: Path, plugin_type: str, codename: str) -> bool:
-    """Create a minimal OS base inside root_path (dnf @core / debootstrap). Returns True on success."""
+def _require(value, what: str = "input"):
+    """Exit cleanly when the user cancels a required prompt (Ctrl-C / Esc)."""
+    if value is None:
+        rprint("[red]Cancelled — nothing was created. Run 'syncit create' again when ready.[/red]")
+        raise typer.Exit(0)
+    return value
+
+
+def _install_missing_tool(tool: str, install_cmd: list[str]) -> bool:
+    """Offer to install a missing helper tool; returns True if available afterwards."""
     from syncit.plugins.base import run_privileged
 
-    rprint(f"[cyan]Creating minimal OS base at {root_path}...[/cyan]")
+    if not questionary.confirm(
+        f"'{tool}' is required but not installed on this machine. Install it now?",
+        default=True,
+    ).ask():
+        return False
+    res = run_privileged(install_cmd, capture_output=False)
+    if res.returncode != 0 or shutil.which(tool) is None:
+        rprint(
+            f"[red]Could not install {tool} (exit {res.returncode}). Install it manually and re-run.[/red]"
+        )
+        return False
+    rprint(f"[green]Installed {tool}.[/green]")
+    return True
+
+
+def _populate_base_root(root_path: Path, plugin_type: str, codename: str) -> bool:
+    """Create a minimal OS base inside root_path (debootstrap / dnf @core). Returns True on success."""
+    from syncit.plugins.base import run_privileged
+
+    rprint(
+        f"[cyan]Creating minimal OS base at {root_path}... (this can take several minutes)[/cyan]"
+    )
     if plugin_type == "apt":
+        if not shutil.which("debootstrap") and not _install_missing_tool(
+            "debootstrap", ["apt-get", "install", "-y", "debootstrap"]
+        ):
+            return False
         cn = codename or "noble"
         rprint(f"[dim]Running: debootstrap {cn} {root_path}[/dim]")
-        res = run_privileged(["debootstrap", cn, str(root_path)])
+        res = run_privileged(["debootstrap", cn, str(root_path)], capture_output=False)
         if res.returncode != 0:
-            rprint(f"[red]debootstrap failed (is it installed?):[/] {res.stderr}")
+            rprint(f"[red]debootstrap failed with exit code {res.returncode}[/red]")
             return False
     else:
+        if not shutil.which("dnf") and not _install_missing_tool(
+            "dnf", ["apt-get", "install", "-y", "dnf"]
+        ):
+            return False
         dnf_init_cmd = ["dnf", "install", "--installroot", str(root_path), "@core", "-y"]
         if codename:
             dnf_init_cmd.extend(["--releasever", codename])
         rprint(f"[dim]Running: {' '.join(dnf_init_cmd)}[/dim]")
-        res = run_privileged(dnf_init_cmd)
+        res = run_privileged(dnf_init_cmd, capture_output=False)
         if res.returncode != 0:
-            rprint(f"[red]dnf install failed:[/] {res.stderr}")
+            rprint(f"[red]dnf install failed with exit code {res.returncode}[/red]")
             return False
     return True
 
@@ -752,7 +789,9 @@ def create_cmd(
     if not bundle_name:
         raise typer.Exit()
 
-    version = questionary.text("Version:", default=meta.get("version", "1.0.0")).ask()
+    version = _require(
+        questionary.text("Version:", default=meta.get("version", "1.0.0")).ask(), "version"
+    )
 
     existing_distro_raw = targets.get("distro", "")
     mapping = {
@@ -774,11 +813,14 @@ def create_cmd(
     else:
         default_distro = "Ubuntu"
 
-    distro_choice = questionary.select(
-        "Target distro:",
-        choices=DISTRO_CHOICES,
-        default=default_distro,
-    ).ask()
+    distro_choice = _require(
+        questionary.select(
+            "Target distro:",
+            choices=DISTRO_CHOICES,
+            default=default_distro,
+        ).ask(),
+        "target distro",
+    )
 
     # ── Codename with auto-detect + hints ────────────────────────────────
     if distro_choice in APT_DISTROS:
@@ -798,18 +840,23 @@ def create_cmd(
             for h in hints:
                 rprint(h)
 
-        codename = questionary.text("Codename:", default=default_codename).ask()
+        codename = _require(
+            questionary.text("Codename:", default=default_codename).ask(), "codename"
+        )
         plugin_type = "apt"
     else:
         codename = ""
         plugin_type = "dnf"
 
     existing_arch = targets.get("arch", "amd64")
-    arch = questionary.select(
-        "Architecture:",
-        choices=["amd64", "arm64"],
-        default=existing_arch if existing_arch in ("amd64", "arm64") else "amd64",
-    ).ask()
+    arch = _require(
+        questionary.select(
+            "Architecture:",
+            choices=["amd64", "arm64"],
+            default=existing_arch if existing_arch in ("amd64", "arm64") else "amd64",
+        ).ask(),
+        "architecture",
+    )
 
     # DNF releasever prompt (stored as codename to reuse manifest structure)
     if plugin_type == "dnf":
@@ -829,17 +876,22 @@ def create_cmd(
             for h in hints:
                 rprint(h)
 
-        codename = questionary.text(
-            "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
-            default=default_releasever,
-        ).ask()
+        codename = _require(
+            questionary.text(
+                "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
+                default=default_releasever,
+            ).ask(),
+            "release version",
+        )
 
     # Base installroot prompt
     has_base = any("base_installroot" in t for t in existing.get("spec", {}).get("tasks", []))
-    enable_base = questionary.confirm(
-        "Enable base_installroot for accurate dependency resolution? (apt/dnf tasks)",
-        default=has_base,
-    ).ask()
+    enable_base = bool(
+        questionary.confirm(
+            "Enable base_installroot for accurate dependency resolution? (apt/dnf tasks)",
+            default=has_base,
+        ).ask()
+    )
 
     base_root_path = ""
     if enable_base:
@@ -1033,7 +1085,7 @@ def create_cmd(
         ],
     ).ask()
 
-    if run_choice == "none":
+    if run_choice is None or run_choice == "none":
         return
 
     rprint(f"\n[cyan]Starting syncit {run_choice}...[/cyan]")

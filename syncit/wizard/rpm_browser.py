@@ -411,10 +411,11 @@ def browse_dnf_packages(
     basearch: str,
     installroot: str | None = None,
     add_repos=None,
-) -> list[str]:
+) -> list[str] | None:
     """
     Interactive search/select loop. Returns a list of pinned nevra strings,
-    or [] if the user cancels / nothing selected.
+    [] if the user finished without selecting anything, or None when the
+    user explicitly cancels ("Cancel browsing" / Ctrl+C).
 
     `add_repos`: optional callable returning extra repo dicts; enables the
     "Add more upstream repos" action so repos and packages can be interleaved.
@@ -432,17 +433,19 @@ def browse_dnf_packages(
 
     sort_mode = "relevance"
 
-    def _search_round() -> None:
-        """One search/select cycle; appends to `selected`."""
+    def _search_round() -> bool:
+        """One search/select cycle; appends to `selected`. True = Ctrl+C cancel."""
         while True:
             if not repos:
                 rprint("[yellow]Add an upstream repo first (search needs at least one).[/yellow]")
-                break
+                return False
             term = questionary.text(
                 "Search packages (type name, press Enter; blank to finish):"
             ).ask()
+            if term is None:
+                return True
             if not term or not term.strip():
-                break
+                return False
             matches = search_packages(repos, releasever, basearch, term, sort_mode)
             if not matches:
                 rprint("[yellow]No matches. Try a shorter prefix.[/yellow]")
@@ -573,7 +576,8 @@ def browse_dnf_packages(
 
     while True:
         if not selected:
-            _search_round()
+            if _search_round():
+                return None
             if not selected:
                 return []
         choices: list[str] = []
@@ -589,7 +593,7 @@ def browse_dnf_packages(
         ]
         action = questionary.select("Package selection:", choices=choices).ask()
         if action is None or action == "Cancel browsing":
-            return []
+            return None
         if action == "Use as-is":
             return selected
         if action.startswith("Change sorting"):

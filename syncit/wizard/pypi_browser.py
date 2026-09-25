@@ -107,15 +107,17 @@ def resolve_pip_deps(spec: str, python_version: str = "") -> list[dict[str, str]
         return out
 
 
-def browse_pypi_packages() -> list[str]:
+def browse_pypi_packages() -> list[str] | None:
     """
     Interactive PyPI search/select loop. Returns a list of pinned
-    'name==version' strings (empty list if cancelled / nothing selected).
+    'name==version' strings, or None when the user presses Ctrl+C.
     """
     selected: list[str] = []
     while True:
         name = questionary.text("PyPI package name (blank to finish):").ask()
-        if not name:
+        if name is None:
+            return None
+        if not name or not name.strip():
             break
         name = name.strip()
         data = fetch_package(name)

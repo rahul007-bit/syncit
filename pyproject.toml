@@ -37,6 +37,12 @@ path = "syncit/__init__.py"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+typeCheckingMode = "off"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

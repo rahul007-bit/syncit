@@ -359,10 +359,11 @@ def browse_apt_packages(
     codename: str = "",
     installroot: str | None = None,
     add_repos: Callable[[], list[dict]] | None = None,
-) -> list[str]:
+) -> list[str] | None:
     """
     Interactive search/select loop. Returns "name=version" pin strings
-    (empty list if cancelled / nothing selected).
+    ([] if finished with nothing selected, None if the user explicitly
+    cancels / Ctrl+C).
     """
     if not shutil.which("apt-get"):
         rprint(
@@ -382,13 +383,15 @@ def browse_apt_packages(
     selected: list[str] = []  # "name=version" pins
     sort_mode = "relevance"
 
-    def _search_round() -> None:
+    def _search_round() -> bool:
         while True:
             term = questionary.text(
                 "Search packages (type name, press Enter; blank to finish):"
             ).ask()
+            if term is None:
+                return True
             if not term or not term.strip():
-                break
+                return False
             matches = search_packages(term, sort_mode)
             if not matches:
                 continue
@@ -446,7 +449,8 @@ def browse_apt_packages(
     _search_round()
     while True:
         if not selected:
-            _search_round()
+            if _search_round():
+                return None
             if not selected:
                 return []
         choices: list[str] = []
@@ -462,7 +466,7 @@ def browse_apt_packages(
         ]
         action = questionary.select("Package selection:", choices=choices).ask()
         if action is None or action == "Cancel browsing":
-            return []
+            return None
         if action == "Use as-is":
             return selected
         if action.startswith("Change sorting"):

@@ -531,8 +531,12 @@ def _prompt_apt_dnf_task(
     releasever: str = "",
     arch: str = "amd64",
     base_root: str = "",
-) -> dict:
-    """Prompt for apt/dnf task fields (repos via catalog picker + packages)."""
+) -> dict | None:
+    """Prompt for apt/dnf task fields (repos via catalog picker + packages).
+
+    Returns None when the user backs out of the live browser (Ctrl+C /
+    "Cancel browsing") — the task is then not added at all.
+    """
     task: dict = {"name": task_name, "plugin": plugin}
 
     repos = _prompt_upstream_repos(plugin, distro_id, releasever, arch)
@@ -560,13 +564,16 @@ def _prompt_apt_dnf_task(
                 rprint(
                     "[dim]base_installroot not populated — resolving deps against build host instead.[/dim]"
                 )
-            packages = browse_dnf_packages(
+            browsed_pkgs = browse_dnf_packages(
                 repos,
                 releasever,
                 repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64"),
                 installroot=installroot or None,
                 add_repos=lambda: _prompt_upstream_repos("dnf", distro_id, releasever, arch),
             )
+            if browsed_pkgs is None:
+                return None
+            packages = browsed_pkgs
         elif (
             not live_ok
             and questionary.select(
@@ -594,12 +601,15 @@ def _prompt_apt_dnf_task(
                 rprint(
                     "[dim]base_installroot not populated — resolving deps against build host instead.[/dim]"
                 )
-            packages = browse_apt_packages(
+            browsed_pkgs = browse_apt_packages(
                 repos,
                 codename=releasever,
                 installroot=installroot or None,
                 add_repos=lambda: _prompt_upstream_repos("apt", distro_id, releasever, arch),
             )
+            if browsed_pkgs is None:
+                return None
+            packages = browsed_pkgs
         elif (
             not live_ok
             and questionary.select(
@@ -623,9 +633,11 @@ def _prompt_apt_dnf_task(
     return task
 
 
-def _prompt_pip_task(task_name: str) -> dict:
+def _prompt_pip_task(task_name: str) -> dict | None:
     task: dict = {"name": task_name, "plugin": "pip"}
     req_file = questionary.text("requirements.txt path (blank to list packages inline):").ask()
+    if req_file is None:
+        return None
     if req_file:
         task["requirements"] = req_file
     else:
@@ -643,7 +655,10 @@ def _prompt_pip_task(task_name: str) -> dict:
         ):
             from syncit.wizard.pypi_browser import browse_pypi_packages
 
-            packages = browse_pypi_packages()
+            browsed_pkgs = browse_pypi_packages()
+            if browsed_pkgs is None:
+                return None
+            packages = browsed_pkgs
         if not packages:
             pkg_str = questionary.text("Python packages (comma-separated):").ask() or ""
             packages = [p.strip() for p in pkg_str.split(",") if p.strip()]
@@ -652,7 +667,7 @@ def _prompt_pip_task(task_name: str) -> dict:
     return task
 
 
-def _prompt_oci_task(task_name: str) -> dict:
+def _prompt_oci_task(task_name: str) -> dict | None:
     task: dict = {"name": task_name, "plugin": "oci_image"}
     images: list[str] = []
     browsed = False
@@ -666,7 +681,10 @@ def _prompt_oci_task(task_name: str) -> dict:
         from syncit.wizard.oci_browser import browse_oci_images
 
         browsed = True
-        images = browse_oci_images(registries=["quay.io", "ghcr.io"])
+        browsed_imgs = browse_oci_images(registries=["quay.io", "ghcr.io"])
+        if browsed_imgs is None:
+            return None
+        images = browsed_imgs
     if not images and not browsed:
         rprint(
             "[dim]Enter image references one per line. Leave blank and press Enter to stop.[/dim]"
@@ -680,12 +698,14 @@ def _prompt_oci_task(task_name: str) -> dict:
     return task
 
 
-def _prompt_file_task(task_name: str) -> dict:
+def _prompt_file_task(task_name: str) -> dict | None:
     task: dict = {"name": task_name, "plugin": "file"}
     files = []
     rprint("[dim]Add files/archives one at a time. Leave URL blank to stop.[/dim]")
     while True:
         url = questionary.text("File URL (blank to stop):").ask()
+        if url is None:
+            return None
         if not url:
             break
         dest = questionary.text("Destination path:").ask() or "/tmp"
@@ -1045,6 +1065,9 @@ def create_cmd(
                     arch=arch,
                     base_root=base_root_path,
                 )
+                if task is None:
+                    rprint("[yellow]Task cancelled — nothing added.[/yellow]")
+                    continue
                 if task.get("plugin") in ("apt", "dnf") and base_root_path:
                     task["base_installroot"] = base_root_path
                 tasks.append(task)

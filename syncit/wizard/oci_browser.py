@@ -260,24 +260,27 @@ _SORT_LABELS = {
 def browse_oci_images(
     registries: list[str] | None = None,
     prompt_label: str = "Docker Hub",
-) -> list[str]:
+) -> list[str] | None:
     """
     Interactive Docker Hub search/select loop with pagination ("fetch more")
     and sorting (relevance / stars / pulls / name). Returns image references
-    ("nginx:1.29", "bitnami/redis:7.4") suitable for the oci_image plugin.
+    ("nginx:1.29", "bitnami/redis:7.4") suitable for the oci_image plugin,
+    or None when the user explicitly cancels.
     """
     if not sys.stdout.isatty():
         return []
     selected: list[str] = []
     sort_mode = "relevance"
 
-    def _search_round() -> None:
+    def _search_round() -> bool:
         while True:
             term = questionary.text(
                 f"Search {prompt_label} or paste a full image ref (blank to finish):"
             ).ask()
+            if term is None:
+                return True
             if not term or not term.strip():
-                break
+                return False
             if _looks_like_ref(term):
                 _handle_full_ref(term, selected)
                 continue
@@ -328,10 +331,12 @@ def browse_oci_images(
                 else:
                     break
 
-    _search_round()
+    if _search_round():
+        return None
     while True:
         if not selected:
-            _search_round()
+            if _search_round():
+                return None
             if not selected:
                 return []
         choices: list[str] = []
@@ -346,7 +351,7 @@ def browse_oci_images(
         ]
         action = questionary.select("Image selection:", choices=choices).ask()
         if action is None or action == "Cancel browsing":
-            return []
+            return None
         if action == "Use as-is":
             return selected
         if action.startswith("Change sorting"):

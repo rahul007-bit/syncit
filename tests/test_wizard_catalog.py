@@ -127,6 +127,55 @@ def test_resolve_download_set_failure_returns_problem(monkeypatch):
     assert "nothing provides" in err
 
 
+# ── Transactional co-installability check ────────────────────────────────
+
+
+def test_verify_install_detects_problem_lines(monkeypatch):
+    stdout = "\n".join(
+        [
+            "Dependencies resolved.",
+            "Error:",
+            " Problem: cannot install both libs-17.9 and libs-17.11",
+            "  - conflicting requests",
+            "Operation aborted.",
+        ]
+    )
+    monkeypatch.setattr(
+        rb, "_run", lambda cmd, timeout=900: _fake_dnf_run(stdout=stdout, returncode=1)
+    )
+    ok, detail = rb.verify_install([], "9", "x86_64", ["libs-17.9"])
+    assert ok is False
+    assert "cannot install both" in (detail or "")
+
+
+def test_verify_install_treats_aborted_but_clean_as_ok(monkeypatch):
+    stdout = "Dependencies resolved.\nTotal download size: 19 M\nOperation aborted.\n"
+    monkeypatch.setattr(
+        rb, "_run", lambda cmd, timeout=900: _fake_dnf_run(stdout=stdout, returncode=1)
+    )
+    ok, detail = rb.verify_install([], "9", "x86_64", ["htop"])
+    assert ok is True
+    assert detail is None
+
+
+# ── Nevra parsing / version compare (conflict healing) ───────────────────
+
+
+def test_nevra_parts():
+    assert rb._nevra_parts("postgresql17-libs-17.9-1PGDG.rhel9.6.x86_64") == (
+        "postgresql17-libs",
+        "17.9",
+        "1PGDG.rhel9.6",
+    )
+    assert rb._nevra_parts("docker-ce-3:29.8.1-1.el9.x86_64")[1] == "3:29.8.1"
+
+
+def test_version_le():
+    assert rb._version_le("17.9", "17.11") is True
+    assert rb._version_le("17.11", "17.9") is False
+    assert rb._version_le("1.0", "1.0") is True
+
+
 # ── Base installroot population checks ───────────────────────────────────
 
 

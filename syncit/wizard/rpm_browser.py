@@ -234,6 +234,71 @@ def resolve_deps(
     return out
 
 
+def _nevra_parts(nevra: str) -> tuple[str, str, str]:
+    """name-version-release.arch -> (name, version_with_epoch, release)."""
+    base = nevra.rsplit(".", 1)[0]
+    parts = base.rsplit("-", 2)
+    if len(parts) != 3:
+        return (base, "", "")
+    return (parts[0], parts[1], parts[2])
+
+
+def _vkey(version: str) -> tuple:
+    """Numeric-aware sort key for an RPM version string."""
+    version = version.split(":", 1)[-1]  # drop epoch
+    parts: list[tuple[int, int, str]] = []
+    for chunk in re.split(r"[._\-+~]", version):
+        m = re.match(r"(\d+)", chunk)
+        if m:
+            parts.append((1, int(m.group(1)), chunk))
+        else:
+            parts.append((0, 0, chunk))
+    return tuple(parts)
+
+
+def _version_le(a: str, b: str) -> bool:
+    return _vkey(a) <= _vkey(b)
+
+
+def verify_install(
+    repos: list[dict],
+    releasever: str,
+    basearch: str,
+    pkgs: list[str],
+    installroot: str | None = None,
+) -> tuple[bool, str | None]:
+    """
+    Co-installability check via `dnf install --assumeno` — a real transactional
+    solve. Repo scope matches pack: system repos are NOT disabled (pack relies
+    on them for base deps like libicu). --assumeno always exits non-zero
+    ('Operation aborted.') even for valid transactions, so success/failure is
+    detected by the presence of solver 'Problem' lines in the output.
+    """
+    cmd = [
+        "dnf",
+        "install",
+        "--assumeno",
+        "-y",
+        "--setopt=install_weak_deps=False",
+        "--setopt=cachedir=" + str(WIZARD_CACHE_DIR),
+    ]
+    if releasever:
+        cmd.extend(["--releasever", releasever])
+    if installroot:
+        cmd.extend(["--installroot", installroot])
+    cmd.extend(build_repo_opts(repos))
+    cmd.extend(pkgs)
+    res = _run(cmd, timeout=900)
+    output = (res.stdout or "") + (res.stderr or "")
+    if "Problem:" in output or "nothing provides" in output:
+        lines = output.splitlines()
+        idx = next(
+            (i for i, l in enumerate(lines) if "Problem:" in l or "nothing provides" in l), 0
+        )
+        return False, "\n".join(lines[idx : idx + 8])
+    return True, None
+
+
 def resolve_download_set(
     repos: list[dict],
     releasever: str,
@@ -366,7 +431,10 @@ def browse_dnf_packages(
         rprint("[cyan]Resolving transitive dependencies...[/cyan]")
         deps = resolve_deps(repos, releasever, basearch, selected, installroot=installroot)
         total = sum(size for _, size in deps)
-        rprint(f"[cyan]Total resolved: {len(deps)} package(s), {_human_size(total)}[/cyan]")
+        rprint(
+            f"[cyan]Total resolved: {len(deps)} package(s), {_human_size(total)}"
+            " [dim](preview — the pack solver picks compatible versions)[/dim][/cyan]"
+        )
         for nevra, size in deps[:40]:
             rprint(f"[dim]  {nevra:<45} {_human_size(size)}[/dim]")
         if len(deps) > 40:
@@ -374,50 +442,75 @@ def browse_dnf_packages(
         if (
             not deps
             or not questionary.confirm(
-                "Pin all resolved dependencies into the manifest?", default=True
+                "Pin the full dependency closure? (verified with dnf's transactional solver)",
+                default=True,
             ).ask()
         ):
             return None
-        top_names = {s.rsplit("-", 2)[0] for s in selected}
-        pinned = list(selected)
-        for dep, _ in deps:
-            if dep.rsplit("-", 2)[0] not in top_names and dep not in pinned:
-                pinned.append(dep)
-        # Verify the pin set with the SAME solver `syncit pack` uses —
-        # otherwise a repo with a broken dep chain (e.g. a meta-package
-        # whose provider is missing) fails later at pack time.
-        while True:
-            rprint("[cyan]Verifying pin set with dnf's solver (same as pack)...[/cyan]")
+
+        sel_versions = {_nevra_parts(s)[1].split(":")[-1] for s in selected}
+        pins = list(selected)
+        for _attempt in range(6):
             download_set, error = resolve_download_set(
-                repos, releasever, basearch, pinned, installroot=installroot
+                repos, releasever, basearch, pins, installroot=installroot
             )
-            if error is None and download_set:
+            if error is not None or not download_set:
+                rprint("[red]Solver rejected the dependency closure:[/red]")
+                if error:
+                    for line in error.splitlines():
+                        rprint(f"[yellow]  {line}[/yellow]")
+                # Auto-recovery: parse "needed by X" and drop the offender.
+                culprits = [c for c in re.findall(r"needed by (\S+)", error or "") if c in pins]
+                if (
+                    culprits
+                    and questionary.confirm(
+                        f"Drop {', '.join(culprits)} and retry? (its requirements will be met by alternatives)",
+                        default=True,
+                    ).ask()
+                ):
+                    pins = [p for p in pins if p not in culprits]
+                    if not pins:
+                        return None
+                    continue
+                break
+            # Transactional co-installability check (matches pack's repo scope).
+            ok, ierr = verify_install(
+                repos, releasever, basearch, download_set, installroot=installroot
+            )
+            if ok:
                 return download_set
-            rprint("[red]Solver rejected the dependency closure:[/red]")
-            if error:
-                for line in error.splitlines():
-                    rprint(f"[yellow]  {line}[/yellow]")
-            # Auto-recovery: parse "needed by X" from the solver error and
-            # offer to drop the offending package, then re-verify.
-            culprits = re.findall(r"needed by (\S+)", error or "")
-            culprits = [c for c in culprits if c in pinned]
-            if (
-                culprits
-                and questionary.confirm(
-                    f"Drop {', '.join(culprits)} and retry? (its requirements will be met by alternatives)",
-                    default=True,
-                ).ask()
-            ):
-                pinned = [p for p in pinned if p not in culprits]
-                if not pinned:
-                    return None
+            rprint("[red]Co-installability check failed:[/red]")
+            for line in (ierr or "").splitlines():
+                rprint(f"[yellow]  {line}[/yellow]")
+            # Heal: when the download set contains two versions of the same
+            # package (pinned 17.9 stack + 'best candidate' 17.11), constrain
+            # the solver to the compatible single version and re-verify.
+            pairs = re.findall(r"cannot install both (\S+) from \S+ and (\S+) from \S+", ierr or "")
+            healed = False
+            for a, b in pairs:
+                an, av, _ = _nevra_parts(a)
+                bn, bv, _ = _nevra_parts(b)
+                av = av.split(":")[-1]
+                bv = bv.split(":")[-1]
+                if av in sel_versions and bv not in sel_versions:
+                    keep = a
+                elif bv in sel_versions and av not in sel_versions:
+                    keep = b
+                else:
+                    keep = a if _version_le(av, bv) else b
+                if keep not in pins:
+                    pins.append(keep)
+                    healed = True
+                    rprint(f"[cyan]Healing version conflict — constraining solver to:[/] {keep}")
+            if healed:
                 continue
-            if questionary.confirm(
-                "Keep top-level packages only and let pack resolve deps at pack time?",
-                default=True,
-            ).ask():
-                return list(selected)
-            return None
+            break
+        if questionary.confirm(
+            "Keep top-level packages only and let pack resolve deps at pack time?",
+            default=True,
+        ).ask():
+            return list(selected)
+        return None
 
     if repos:
         warm_metadata(repos, releasever, basearch)

@@ -42,6 +42,19 @@
     gpgkey: https://pkgs.k8s.io/core:/stable:/{k8s_series}/rpm/repodata/repomd.xml.key
     gpgcheck: true
 
+- id: cri-o
+  label: CRI-O (pkgs.k8s.io)
+  description: CRI-O container runtime; published stable series lag K8s (1.31/1.32)
+  distros: [rhel, rocky, almalinux, centos]
+  vars:
+    crio_series:
+      prompt: CRI-O series (e.g. v1.32)
+      default: v1.32
+  repo:
+    baseurl: https://pkgs.k8s.io/addons:/cri-o:/stable:/{crio_series}/rpm/
+    gpgkey: https://pkgs.k8s.io/addons:/cri-o:/stable:/{crio_series}/rpm/repodata/repomd.xml.key
+    gpgcheck: true
+
 - id: pgdg
   label: PostgreSQL PGDG
   description: Official PostgreSQL RPMs — adds the common repo plus the versioned server repo

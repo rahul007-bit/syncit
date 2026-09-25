@@ -127,6 +127,107 @@ Flags: `--dry-run`, `--verbose`, `--force`, `--only <plugins>`, `--format tar.gz
 
 ---
 
+## Interactive create wizard
+
+`syncit create [bundle.yaml]` is an interactive wizard for building and updating manifests.
+
+### Navigation map
+
+```
+syncit create bundle.yaml          syncit create
+        │                                  │
+        ▼                                  ▼
+┌─────────────────────┐          ┌──────────────────────────┐
+│ bundle.yaml exists? │          │ Bundle metadata          │
+│  yes        no      │          │ (history-aware prompts)  │
+└──┬──────────────┬───┘          │  name / version / distro │
+   │              │              │  arch / releasever|code  │
+   ▼              │              │  base_installroot        │
+┌──────────────┐  │              └────────────┬─────────────┘
+│ METADATA     │  │                           │
+│ Continue*    │  └──────────────►────────────┤
+│ Edit         │                              │
+│ Cancel       │      ┌───────────────────────┘
+└──┬───────────┘      ▼
+   │               TASK MENU (loop)  ◄────────────── status line
+   │               ? What next?          [2 tasks: tools(2 pkgs) ·
+   │                » Search catalog      images(1 imgs)]
+   │                  Browse packages & images
+   │                  Advanced…
+   │                  Done ─────────────────────────────┐
+   ▼                                                    │
+1️⃣ SEARCH CATALOG                                       │
+   fuzzy search → entry → version → subtasks appended ───┤
+                                                        │
+2️⃣ BROWSE PACKAGES & IMAGES          ┌──────────────────┘
+   ? Browse:  » apt/dnf packages ◄───┤ auto per distro
+              │ PyPI packages        │
+              │ Container images     │
+              │ Back                 │
+   ┌──────────┴────────┬─────────────┴─┐
+   ▼                   ▼               ▼
+   APT/DNF             PYPI            OCI
+   repos:              search:         registry:
+   ├ reuse previous    ├ history       ├ docker.io / quay.io
+   │  repo selection   ├ new search    ├ registry.k8s.io / ghcr / gcr
+   ├ curated catalog   pick pkg →      ├ manual ref (any registry)
+   ├ [host] repos      version →       ├ search / tags / fetch-more
+   ├ add custom        dep closure →   ├ sort modes
+   └ browse list       add more        └ tag picker
+   search: history + sort + pin closure + review (Back at every step)
+   └──► task added, back to TASK MENU ────────────────┘
+
+3️⃣ ADVANCED…
+   » Create custom task  (plugin: apt/dnf/pip/oci_image/file)
+     Add empty task
+     Remove a task
+     Reload catalog
+     Back
+
+4️⃣ DONE → REVIEW SCREEN
+   ? Review:
+    » Save bundle
+      Edit a task    → field menu: rename / packages / repos /
+                       images / files / Back (live browsers preload
+                       the existing selection)
+      Remove a task
+      Move a task (up/down)
+      Back to task menu
+   Save → "Save to: [bundle.yaml]" → pack/apply offer
+```
+
+### Update mode is preservative
+
+Running `syncit create bundle.yaml` on an existing manifest **never
+regenerates the file**:
+
+- It shows the loaded state (task list, metadata) and offers
+  **Continue with current metadata** (default) / **Edit metadata** / **Cancel**.
+- Continue → zero re-prompts; jump straight to the task menu with existing
+  tasks loaded.
+- Edit metadata → per-field menu (name / version / distro / arch /
+  codename / base_installroot), each pre-filled from the file.
+- Only explicitly edited fields and tasks change; unknown manifest keys
+  are preserved on save.
+
+### History
+
+Recently used values are stored in `~/.config/syncit/history.json` (capped
+at 10 entries per key, most-recent first):
+
+- Field history — bundle name, version, codename/releasever, base-root
+  path, requirements path, task names: prompts become type-or-pick
+  (recent values as choices + "Enter a new value…").
+- Search history — per browser (apt / dnf / pypi / docker): the search
+  prompt offers recent terms + "New search…".
+- Repo history — the previous upstream-repo selection for the same
+  distro is offered for reuse ("Reuse the previous upstream repos…").
+
+History is a convenience only: a missing or corrupt file is treated as
+empty, and deleting the file resets everything.
+
+---
+
 ## Supported Plugins
 
 | Plugin | Description |

@@ -145,14 +145,11 @@ class OciV2Registry(RegistryAdapter):
         headers: dict[str, str] = {}
         if self.token_service:
             token = self._anon_token(repo)
-            if not token:
+            if token is None:
                 return []
             headers["Authorization"] = f"Bearer {token}"
-        req = urllib.request.Request(url, headers={"User-Agent": "syncit-wizard/1.0", **headers})
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-        except Exception:
+        data = _get_json(url, headers=headers)
+        if not data:
             rprint(
                 f"[yellow]Tag listing failed for {self.name}/{repo} (repo may be private).[/yellow]"
             )

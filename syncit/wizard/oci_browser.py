@@ -63,6 +63,90 @@ def _fmt_count(n: int) -> str:
     return f"{value:.0f}T"
 
 
+def _add_from_registry(selected: list[str]) -> None:
+    """Structured flow for non-Docker-Hub registries (quay/k8s/ghcr/gcr/custom)."""
+    from syncit.wizard.registries import format_ref, pick_registry
+
+    adapter = pick_registry()
+    if adapter is None:
+        return
+
+    if adapter.supports_search:
+        term = questionary.text(
+            f"Search {adapter.name} (blank to enter a repo path instead):"
+        ).ask()
+        if term and term.strip():
+            results, total = adapter.search(term)
+            if not results:
+                rprint("[yellow]No matches on this registry.[/yellow]")
+            choices = [questionary.Choice(title=f"{n:<38}  {s[:70]}", value=n) for n, s in results]
+            picked = (
+                questionary.checkbox(
+                    f"Select images on {adapter.name} (space to toggle):",
+                    choices=choices,
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                or []
+            )
+            for repo in picked:
+                tags = adapter.tags(repo)
+                if not tags:
+                    continue
+                tag = questionary.select(
+                    f"Tag for {repo}:",
+                    choices=[questionary.Choice(title=t, value=t) for t in tags],
+                ).ask()
+                if tag:
+                    ref = format_ref(adapter.name, repo, tag)
+                    if ref not in selected:
+                        selected.append(ref)
+                        rprint(f"[green]Added:[/] {ref}")
+            return
+        term = ""
+
+    # No search: known paths or manual repo path
+    quick = adapter.quick_repos()
+    repo = None
+    if quick:
+        choices = [questionary.Choice(title=q, value=q) for q in quick]
+        choices.append(
+            questionary.Choice(title="Other (type the repository path)", value="__other__")
+        )
+        picked = questionary.select(f"Repository on {adapter.name}:", choices=choices).ask()
+        if picked is None:
+            return
+        repo = (
+            questionary.text(f"Repository path on {adapter.name} (e.g. org/app):").ask()
+            if picked == "__other__"
+            else picked
+        )
+    else:
+        repo = questionary.text(f"Repository path on {adapter.name} (e.g. org/app):").ask()
+    if not repo or not repo.strip():
+        return
+    repo = repo.strip()
+    tags = adapter.tags(repo)
+    if tags:
+        tag = questionary.select(
+            f"Tag for {adapter.name}/{repo}:",
+            choices=[questionary.Choice(title=t, value=t) for t in tags],
+        ).ask()
+        if tag:
+            ref = format_ref(adapter.name, repo, tag)
+            if ref not in selected:
+                selected.append(ref)
+                rprint(f"[green]Added:[/] {ref}")
+            return
+    # Tag listing failed (private repo?) — manual entry
+    ref = questionary.text(
+        f"Full image reference on {adapter.name} (e.g. {adapter.name}/org/app:tag):"
+    ).ask()
+    if ref and ref.strip() and ref.strip() not in selected:
+        selected.append(ref.strip())
+        rprint(f"[green]Added:[/] {ref.strip()}")
+
+
 def list_tags(repo: str, limit: int = 30) -> list[str]:
     """List usable tags for a repo, newest/latest-flavored first."""
     if "/" not in repo:
@@ -214,9 +298,7 @@ def browse_oci_images(
             _search_round()
             continue
         if action == "Add image from another registry (manual)":
-            ref = questionary.text("Full image reference (e.g. quay.io/x/y:tag):").ask()
-            if ref and ref.strip() and ref.strip() not in selected:
-                selected.append(ref.strip())
+            _add_from_registry(selected)
             continue
         # Review
         keep = (

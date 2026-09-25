@@ -85,6 +85,57 @@ def test_list_tags_filters_digests():
     assert tags == ["latest", "1.29"]
 
 
+# ── Multi-registry support ───────────────────────────────────────────────
+
+
+def test_parse_image_ref_variants():
+    from syncit.wizard.registries import parse_image_ref
+
+    assert parse_image_ref("nginx:1.29") == ("docker.io", "library/nginx", "1.29")
+    assert parse_image_ref("bitnami/redis:7.4") == ("docker.io", "bitnami/redis", "7.4")
+    assert parse_image_ref("quay.io/org/app:tag") == ("quay.io", "org/app", "tag")
+    assert parse_image_ref("registry.k8s.io/kube-apiserver") == (
+        "registry.k8s.io",
+        "kube-apiserver",
+        None,
+    )
+
+
+def test_format_ref_short_for_dockerhub():
+    from syncit.wizard.registries import format_ref
+
+    assert format_ref("docker.io", "library/nginx", "1.29") == "library/nginx:1.29"
+    assert format_ref("quay.io", "org/app", "tag") == "quay.io/org/app:tag"
+
+
+def test_quay_search_parses_results():
+    from syncit.wizard.registries import QuayRegistry
+
+    payload = {
+        "results": [
+            {
+                "name": "postgres-exporter",
+                "namespace": {"name": "prometheuscommunity"},
+                "description": "Exporter",
+                "pull_count": 1000,
+            }
+        ],
+        "total_count": 1,
+    }
+    quay = QuayRegistry()
+    with (
+        patch.object(quay, "_get_json", lambda *a, **k: payload)
+        if False
+        else patch(
+            "syncit.wizard.registries._get_json", lambda url, headers=None, timeout=30: payload
+        )
+    ):
+        results, total = quay.search("postgres")
+    assert total == 1
+    assert results[0][0] == "prometheuscommunity/postgres-exporter"
+    assert "⬇" in results[0][1]
+
+
 def test_list_tags_prefixes_library():
     captured = {}
 
@@ -95,3 +146,75 @@ def test_list_tags_prefixes_library():
     with patch.object(ob, "_fetch_json", fake_fetch):
         ob.list_tags("nginx")
     assert "library/nginx" in captured["url"]
+
+
+# ── Multi-registry support ───────────────────────────────────────────────
+
+
+def test_parse_image_ref_variants():
+    from syncit.wizard.registries import parse_image_ref
+
+    assert parse_image_ref("nginx:1.29") == ("docker.io", "library/nginx", "1.29")
+    assert parse_image_ref("bitnami/redis:7.4") == ("docker.io", "bitnami/redis", "7.4")
+    assert parse_image_ref("quay.io/org/app:tag") == ("quay.io", "org/app", "tag")
+    assert parse_image_ref("registry.k8s.io/kube-apiserver") == (
+        "registry.k8s.io",
+        "kube-apiserver",
+        None,
+    )
+
+
+def test_format_ref_short_for_dockerhub():
+    from syncit.wizard.registries import format_ref
+
+    assert format_ref("docker.io", "library/nginx", "1.29") == "library/nginx:1.29"
+    assert format_ref("quay.io", "org/app", "tag") == "quay.io/org/app:tag"
+
+
+def test_quay_search_parses_results():
+    from syncit.wizard.registries import QuayRegistry
+
+    payload = {
+        "results": [
+            {
+                "name": "postgres-exporter",
+                "namespace": {"name": "prometheuscommunity"},
+                "description": "Exporter",
+                "pull_count": 1000,
+            }
+        ],
+        "total_count": 1,
+    }
+    with patch("syncit.wizard.registries._get_json", lambda url, headers=None, timeout=30: payload):
+        quay = QuayRegistry()
+        results, total = quay.search("postgres")
+    assert total == 1
+    assert results[0][0] == "prometheuscommunity/postgres-exporter"
+    assert "⬇" in results[0][1]
+
+
+def test_oci_v2_registry_tags_via_token(monkeypatch):
+    from syncit.wizard.registries import OciV2Registry
+
+    calls = []
+
+    def fake_get_json(url, headers=None, timeout=30):
+        calls.append(url)
+        if "/token?" in url:
+            return {"token": "tok"}
+        return {"name": "kube-apiserver", "tags": ["v1.33.1", "v1.34.2", "v1.35.0", ""]}
+
+    monkeypatch.setattr("syncit.wizard.registries._get_json", fake_get_json)
+    reg = OciV2Registry("ghcr.io", token_service="ghcr.io")
+    tags = reg.tags("org/app")
+    assert any("/token?" in u for u in calls)
+    assert "v1.34.2" in tags
+
+
+def test_registry_adapters_configured():
+    from syncit.wizard.registries import REGISTRY_ADAPTERS
+
+    ghcr = REGISTRY_ADAPTERS["ghcr.io"]
+    assert ghcr.token_service == "ghcr.io"
+    assert "kube-apiserver" in REGISTRY_ADAPTERS["registry.k8s.io"].quick_repos()
+    assert REGISTRY_ADAPTERS["quay.io"].supports_search is True

@@ -219,20 +219,54 @@ class AptPlugin(OfflinePlugin):
                 if ctx.verbose:
                     rprint(f"    [dim]Added repo '{name}' for pack[/dim]")
 
-            # Also include system sources.d so base OS repos resolve transitive deps
+            # Also include system sources.d so base OS repos resolve transitive deps.
+            # Filter per (uri, suite) pair instead of dropping whole files — a
+            # manifest repo may re-declare one host suite while the same host
+            # file still provides other suites the solver needs.
+            manifest_pairs: set[tuple[str, str]] = set()
+            for repo in repos:
+                parts = repo.get("url", "").split()
+                if len(parts) >= 3 and parts[0].startswith("deb"):
+                    manifest_pairs.add((parts[1], parts[2]))
+
+            def line_pair(text: str) -> tuple[str, str] | None:
+                tokens = text.split()
+                if len(tokens) >= 3 and tokens[0].startswith("deb"):
+                    return (tokens[1], tokens[2])
+                return None
+
             sys_sources_d = Path("/etc/apt/sources.list.d")
             if sys_sources_d.exists():
                 for f in sys_sources_d.glob("*"):
-                    if f.is_file() and (f.suffix == ".list" or f.suffix == ".sources"):
+                    if f.is_file() and f.suffix == ".list":
                         try:
-                            content = f.read_text(encoding="utf-8")
-                            if is_conflicting(content):
-                                if ctx.verbose:
-                                    rprint(
-                                        f"    [dim]Skipping conflicting host repository file: {f.name}[/dim]"
-                                    )
-                                continue
+                            kept: list[str] = []
+                            had_conflict = False
+                            for line in f.read_text(encoding="utf-8").splitlines():
+                                pair = line_pair(line)
+                                if pair and pair in manifest_pairs:
+                                    had_conflict = True
+                                    continue
+                                kept.append(line)
+                            if had_conflict and ctx.verbose:
+                                rprint(
+                                    f"    [dim]Filtered duplicate suite(s) from host file: {f.name}[/dim]"
+                                )
+                            if any(l.startswith("deb") for l in kept):
+                                (temp_sources_d / f.name).write_text(
+                                    "\n".join(kept) + "\n", encoding="utf-8"
+                                )
+                        except Exception:
                             shutil.copy2(str(f), str(temp_sources_d / f.name))
+                    elif f.is_file() and f.suffix == ".sources":
+                        try:
+                            from syncit.wizard.host_repos import filter_apt_sources_file
+
+                            filtered = filter_apt_sources_file(f, manifest_pairs)
+                            if filtered.strip():
+                                (temp_sources_d / f.name).write_text(filtered, encoding="utf-8")
+                            elif ctx.verbose:
+                                rprint(f"    [dim]Skipping fully-covered host file: {f.name}[/dim]")
                         except Exception:
                             shutil.copy2(str(f), str(temp_sources_d / f.name))
 

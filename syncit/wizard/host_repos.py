@@ -149,6 +149,55 @@ def _parse_apt_deb822_file(path: Path) -> list[tuple[str, str, str]]:
     return out
 
 
+def filter_apt_sources_file(path: Path, covered: set[tuple[str, str]]) -> str:
+    """
+    Return the content of a deb822 .sources file with every (uri, suite) pair
+    in `covered` removed (other suites in the same block are kept).
+    """
+    kept_blocks: list[str] = []
+    block: dict[str, str] = {}
+    order: list[str] = []
+
+    def flush() -> None:
+        nonlocal block, order
+        if not order:
+            block = {}
+            return
+        if block.get("Enabled", "yes").strip().lower() not in (
+            "no",
+            "false",
+        ) and "deb" in block.get("Types", ""):
+            uris = block.get("URIs", "").split()
+            suites = block.get("Suites", "").split()
+            remaining = [s for s in suites if not any((u, s) in covered for u in uris)]
+            if remaining:
+                out = []
+                for key in order:
+                    value = block[key]
+                    if key == "Suites":
+                        value = " ".join(remaining)
+                    out.append(f"{key}: {value}")
+                kept_blocks.append("\n".join(out))
+        block = {}
+        order = []
+
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            flush()
+            continue
+        if line.startswith("#"):
+            continue
+        if ":" in line and not line.startswith((" ", "\t")):
+            key, _, value = line.partition(":")
+            key = key.strip()
+            if key not in block:
+                order.append(key)
+            block[key] = value.strip()
+    flush()
+    return "\n\n".join(kept_blocks) + "\n" if kept_blocks else ""
+
+
 def load_host_apt_repos(
     sources_list: Path | None = None,
     sources_dir: Path | None = None,

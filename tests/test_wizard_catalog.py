@@ -75,6 +75,49 @@ def test_render_entry_repos_pgdg_adds_common_and_versioned():
     assert "https://download.postgresql.org/pub/repos/yum/17/redhat/rhel-9.6-x86_64" in urls
 
 
+# ── Expanded catalog: databases, messaging, big data, CI tools ───────────
+
+
+def test_expanded_catalog_entries_present():
+    ids = {r["id"] for r in rc.load_repos("rocky")}
+    for expected in (
+        "redis",
+        "rabbitmq",
+        "rabbitmq-erlang",
+        "mysql-community",
+        "mariadb",
+        "clickhouse",
+        "elasticsearch",
+        "jenkins",
+        "hadoop-bigtop",
+    ):
+        assert expected in ids, f"{expected} missing from catalog"
+
+
+def test_mysql_community_var_render():
+    entry = next(r for r in rc.load_repos("rocky") if r["id"] == "mysql-community")
+    out = rc.render_entry_repos(
+        entry,
+        "rocky",
+        releasever="9",
+        basearch="x86_64",
+        values={"mysql_ver": "8.4-community"},
+    )
+    assert out[0]["baseurl"] == "https://repo.mysql.com/yum/8.4-community/el/9/x86_64/"
+
+
+def test_hadoop_bigtop_var_render():
+    entry = next(r for r in rc.load_repos("rocky") if r["id"] == "hadoop-bigtop")
+    out = rc.render_entry_repos(
+        entry,
+        "rocky",
+        releasever="9",
+        basearch="x86_64",
+        values={"bigtop_ver": "3.6.0"},
+    )
+    assert out[0]["baseurl"] == "http://repos.bigtop.apache.org/releases/3.6.0/rockylinux/9/x86_64"
+
+
 def test_substitute_vars_brace_and_dollar():
     assert (
         rc.substitute_vars("rhel-{minor}-$basearch", {"minor": "9.6", "basearch": "x86_64"})

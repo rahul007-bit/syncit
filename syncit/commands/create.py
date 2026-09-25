@@ -338,10 +338,33 @@ def _prompt_upstream_repos(
         choices = []
         if plugin == "dnf":
             choices.append("Browse popular repos (curated catalog)")
+        if repos:
+            choices.append("Remove added repo(s)")
         choices += ["Add custom repo", f"Done ({len(repos)} repo(s))"]
         action = questionary.select("Upstream repos:", choices=choices).ask()
         if action is None or action.startswith("Done"):
             return repos
+
+        if action.startswith("Remove"):
+            drop = (
+                questionary.checkbox(
+                    "Uncheck the repo(s) to remove (Enter to confirm):",
+                    choices=[
+                        questionary.Choice(
+                            title=f"{r.get('name', '?')}  {r.get('baseurl', '')[:60]}",
+                            value=r.get("name"),
+                            checked=True,
+                        )
+                        for r in repos
+                    ],
+                ).ask()
+                or []
+            )
+            dropped_names = {r.get("name") for r in repos} - set(drop)
+            repos = [r for r in repos if r.get("name") in set(drop)]
+            for name in sorted(dropped_names):
+                rprint(f"[yellow]Repo removed:[/] {name}")
+            continue
 
         if action.startswith("Browse"):
             catalog_entries = repo_catalog.load_repos(distro_id)

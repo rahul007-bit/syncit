@@ -147,6 +147,103 @@
     gpgkey: https://nginx.org/keys/nginx_signing.key
     gpgcheck: true
 
+- id: redis
+  label: Redis (official)
+  description: Redis server/stack from packages.redis.io
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://packages.redis.io/rpm/rhel9/$basearch
+    gpgkey: https://packages.redis.io/gpg
+    gpgcheck: true
+
+- id: rabbitmq
+  label: RabbitMQ Server
+  description: RabbitMQ messaging server from the official packagecloud repo
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://packagecloud.io/rabbitmq/rabbitmq-server/el/9/$basearch
+    gpgkey: https://packagecloud.io/rabbitmq/rabbitmq-server/gpgkey
+    gpgcheck: true
+
+- id: rabbitmq-erlang
+  label: Erlang (for RabbitMQ)
+  description: Modern Erlang runtime required by RabbitMQ
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://packagecloud.io/rabbitmq/erlang/el/9/$basearch
+    gpgkey: https://packagecloud.io/rabbitmq/erlang/gpgkey
+    gpgcheck: true
+
+- id: mysql-community
+  label: MySQL Community
+  description: MySQL server 8.x from repo.mysql.com (prompts for 8.0/8.4)
+  distros: [rhel, rocky, almalinux, centos]
+  vars:
+    mysql_ver:
+      prompt: MySQL series (e.g. 8.4-community, 8.0-community)
+      default: "8.4-community"
+  repo:
+    baseurl: https://repo.mysql.com/yum/{mysql_ver}/el/9/$basearch/
+    gpgkey: https://repo.mysql.com/RPM-GPG-KEY-mysql-2023
+    gpgcheck: true
+
+- id: mariadb
+  label: MariaDB (official)
+  description: MariaDB server from yum.mariadb.org (11.8/11.4/10.11 available; amd64 naming per MariaDB convention)
+  distros: [rhel, rocky, almalinux, centos]
+  vars:
+    mariadb_ver:
+      prompt: MariaDB series (e.g. 11.4, 11.8)
+      default: "11.4"
+  repo:
+    baseurl: https://yum.mariadb.org/{mariadb_ver}/rhel9-amd64/
+    gpgkey: https://yum.mariadb.org/RPM-GPG-KEY-MariaDB
+    gpgcheck: true
+
+- id: clickhouse
+  label: ClickHouse
+  description: ClickHouse OLAP database from packages.clickhouse.com (stable)
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://packages.clickhouse.com/rpm/stable/
+    gpgkey: https://packages.clickhouse.com/rpm/stable/repodata/repomd.xml.key
+    gpgcheck: true
+
+- id: elasticsearch
+  label: Elastic Stack
+  description: Elasticsearch, Logstash, Kibana from artifacts.elastic.co (prompts 9.x/8.x)
+  distros: [rhel, rocky, almalinux, centos]
+  vars:
+    elastic_ver:
+      prompt: Elastic major (e.g. 9.x, 8.x)
+      default: 9.x
+  repo:
+    baseurl: https://artifacts.elastic.co/packages/{elastic_ver}/yum
+    gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    gpgcheck: true
+
+- id: jenkins
+  label: Jenkins
+  description: Jenkins CI controller from pkg.jenkins.io (redhat-stable)
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://pkg.jenkins.io/redhat-stable/
+    gpgkey: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+    gpgcheck: true
+
+- id: hadoop-bigtop
+  label: Apache Hadoop (Bigtop)
+  description: Full Hadoop ecosystem (Hadoop, HBase, Hive, Spark...) via Apache Bigtop
+  distros: [rhel, rocky, almalinux, centos]
+  vars:
+    bigtop_ver:
+      prompt: Bigtop release (e.g. 3.6.0)
+      default: "3.6.0"
+  repo:
+    baseurl: http://repos.bigtop.apache.org/releases/{bigtop_ver}/rockylinux/9/$basearch
+    gpgkey: https://dist.apache.org/repos/dist/release/bigtop/KEYS
+    gpgcheck: true
+
 - id: rpmfusion-free
   label: RPM Fusion (Free)
   description: Community add-ons Fedora/EL won't ship (multimedia, drivers)

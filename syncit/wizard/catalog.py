@@ -59,7 +59,8 @@ def load_repos(distro_id: str) -> list[dict[str, Any]]:
                 "id": entry["id"],
                 "label": entry.get("label", entry["id"]),
                 "description": entry.get("description", ""),
-                "repo": entry["repo"],
+                "repo": entry.get("repo"),
+                "repos": entry.get("repos"),
                 "repo_overrides": entry.get("repo_overrides") or {},
                 "vars": entry.get("vars") or {},
             }

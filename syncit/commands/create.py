@@ -427,7 +427,7 @@ def _prompt_upstream_repos(
                 )
             picked = (
                 questionary.checkbox(
-                    "Select upstream repos (space to toggle, Enter to confirm):",
+                    "Select upstream repos (space to toggle, Enter to confirm; type to filter):",
                     choices=[
                         questionary.Choice(
                             title=f"{e['label']:<24} {e['description']}",
@@ -437,6 +437,7 @@ def _prompt_upstream_repos(
                         )
                         for e in entries
                     ],
+                    use_search_filter=True,
                 ).ask()
                 or []
             )
@@ -652,13 +653,28 @@ def _prompt_pip_task(task_name: str) -> dict:
 
 def _prompt_oci_task(task_name: str) -> dict:
     task: dict = {"name": task_name, "plugin": "oci_image"}
-    rprint("[dim]Enter image references one per line. Leave blank and press Enter to stop.[/dim]")
-    images = []
-    while True:
-        img = questionary.text("Image (blank to stop):").ask()
-        if not img:
-            break
-        images.append(img)
+    images: list[str] = []
+    browsed = False
+    if (
+        sys.stdout.isatty()
+        and questionary.confirm(
+            "Search Docker Hub live (search images, pick tags, pull counts)? (No = enter manually)",
+            default=True,
+        ).ask()
+    ):
+        from syncit.wizard.oci_browser import browse_oci_images
+
+        browsed = True
+        images = browse_oci_images(registries=["quay.io", "ghcr.io"])
+    if not images and not browsed:
+        rprint(
+            "[dim]Enter image references one per line. Leave blank and press Enter to stop.[/dim]"
+        )
+        while True:
+            img = questionary.text("Image (blank to stop):").ask()
+            if not img:
+                break
+            images.append(img)
     task["images"] = images
     return task
 

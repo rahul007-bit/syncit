@@ -19,6 +19,8 @@ from typing import Any, Callable
 import questionary
 from rich import print as rprint
 
+from syncit.wizard.ranking import rank_matches
+
 APT_CACHE_ROOT = Path("~/.cache/syncit/wizard-apt").expanduser()
 
 # Matches "<name>_<version>_<arch>.deb" filenames from --print-uris output
@@ -233,7 +235,7 @@ def warm_apt_metadata(repos: list[dict], installroot: str | None = None) -> bool
     return True
 
 
-def search_packages(term: str, limit: int = 200) -> list[tuple[str, str]]:
+def search_packages(term: str, sort_mode: str = "relevance") -> list[tuple[str, str]]:
     """Search packages across wizard repos + host sources. Returns [(name, summary)]."""
     term = term.strip()
     rprint(f"[cyan]Searching apt for '{term}'... (Ctrl-C to cancel)[/cyan]")
@@ -253,14 +255,13 @@ def search_packages(term: str, limit: int = 200) -> list[tuple[str, str]]:
         name = name.strip()
         if name and not any(n == name for n, _ in out):
             out.append((name, summary.strip()))
-        if len(out) >= limit:
-            rprint(f"[yellow]Truncated to first {limit} matches — refine your search.[/yellow]")
-            break
-    rprint(
-        f"[green]Found {len(out)} match(es)[/green]"
-        if out
-        else "[yellow]No matches. Try a shorter prefix.[/yellow]"
-    )
+    out = rank_matches(term, out)
+    if sort_mode == "name":
+        out = sorted(out)
+    if out:
+        rprint(f"[green]Found {len(out)} match(es)[/green]")
+    else:
+        rprint("[yellow]No matches. Try a shorter prefix.[/yellow]")
     return out
 
 
@@ -379,6 +380,7 @@ def browse_apt_packages(
         "[cyan]Search packages, add repos, or finish — your selection is kept between steps.[/cyan]"
     )
     selected: list[str] = []  # "name=version" pins
+    sort_mode = "relevance"
 
     def _search_round() -> None:
         while True:
@@ -387,7 +389,7 @@ def browse_apt_packages(
             ).ask()
             if not term or not term.strip():
                 break
-            matches = search_packages(term)
+            matches = search_packages(term, sort_mode)
             if not matches:
                 continue
             choices = [questionary.Choice(title=f"{n:<38}  {s[:60]}", value=n) for n, s in matches]
@@ -395,6 +397,7 @@ def browse_apt_packages(
                 questionary.checkbox(
                     "Select packages (space to toggle, Enter to confirm):",
                     choices=choices,
+                    use_search_filter=True,
                 ).ask()
                 or []
             )
@@ -452,6 +455,7 @@ def browse_apt_packages(
             "Search packages",
             "Review / remove packages",
             "Pin full dependency closure (recommended)",
+            f"Change sorting (current: {sort_mode})",
             "Use as-is",
             "Cancel browsing",
         ]
@@ -460,6 +464,10 @@ def browse_apt_packages(
             return []
         if action == "Use as-is":
             return selected
+        if action.startswith("Change sorting"):
+            sort_mode = "name" if sort_mode == "relevance" else "relevance"
+            rprint(f"[cyan]Search results will be sorted by: {sort_mode}[/cyan]")
+            continue
         if action == "Add more upstream repos":
             added = add_repos() if add_repos else []
             known = {r.get("name") for r in repos}

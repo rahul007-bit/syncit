@@ -18,6 +18,8 @@ from typing import Any
 import questionary
 from rich import print as rprint
 
+from syncit.wizard.ranking import rank_matches
+
 WIZARD_CACHE_DIR = Path("~/.cache/syncit/wizard").expanduser()
 
 # Matches RPM nevra output (name-version-release.arch). Used to filter
@@ -156,9 +158,13 @@ def _fail(res: subprocess.CompletedProcess, context: str) -> None:
 
 
 def search_packages(
-    repos: list[dict], releasever: str, basearch: str, term: str, limit: int = 300
+    repos: list[dict],
+    releasever: str,
+    basearch: str,
+    term: str,
+    sort_mode: str = "relevance",
 ) -> list[tuple[str, str]]:
-    """Search packages across the wizard repos. Returns [(name, summary)]."""
+    """Search packages across the wizard repos. Returns [(name, summary)] (unlimited)."""
     term = term.strip()
     rprint(f"[cyan]Searching {len(repos)} repo(s) for '{term}'... (Ctrl-C to cancel)[/cyan]")
     t0 = time.time()
@@ -187,11 +193,11 @@ def search_packages(
             continue
         seen.add(name)
         out.append((name, summary.strip()))
-        if len(out) >= limit:
-            rprint(
-                f"[yellow]Result list truncated to first {limit} matches — refine your search for more.[/yellow]"
-            )
-            break
+    out = rank_matches(term, out)
+    if sort_mode == "name":
+        out = sorted(out)
+    if out:
+        rprint(f"[green]Found {len(out)} match(es) in {elapsed:.1f}s[/green]")
     if not out:
         # rc=0 but no matches: show what dnf actually said so a silent
         # metadata re-download or repo error is visible
@@ -424,6 +430,8 @@ def browse_dnf_packages(
         )
         return []
 
+    sort_mode = "relevance"
+
     def _search_round() -> None:
         """One search/select cycle; appends to `selected`."""
         while True:
@@ -435,7 +443,7 @@ def browse_dnf_packages(
             ).ask()
             if not term or not term.strip():
                 break
-            matches = search_packages(repos, releasever, basearch, term)
+            matches = search_packages(repos, releasever, basearch, term, sort_mode)
             if not matches:
                 rprint("[yellow]No matches. Try a shorter prefix.[/yellow]")
                 continue
@@ -444,6 +452,7 @@ def browse_dnf_packages(
                 questionary.checkbox(
                     "Select packages (space to toggle, Enter to confirm):",
                     choices=choices,
+                    use_search_filter=True,
                 ).ask()
                 or []
             )
@@ -573,6 +582,7 @@ def browse_dnf_packages(
             "Search packages",
             "Review / remove packages",
             "Pin full dependency closure (recommended)",
+            f"Change sorting (current: {sort_mode})",
             "Use as-is",
             "Cancel browsing",
         ]
@@ -581,6 +591,10 @@ def browse_dnf_packages(
             return []
         if action == "Use as-is":
             return selected
+        if action.startswith("Change sorting"):
+            sort_mode = "name" if sort_mode == "relevance" else "relevance"
+            rprint(f"[cyan]Search results will be sorted by: {sort_mode}[/cyan]")
+            continue
         if action == "Add more upstream repos":
             added = add_repos() if add_repos else []
             known = {r.get("name") for r in repos}

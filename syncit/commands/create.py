@@ -20,7 +20,7 @@ from syncit.commands.pack import run_pack
 from syncit.commands.up import run_up
 from syncit.wizard import catalog as repo_catalog
 from syncit.wizard import host_repos
-from syncit.wizard.rpm_browser import browse_dnf_packages
+from syncit.wizard.rpm_browser import browse_dnf_packages, check_repo_url
 
 console = Console()
 
@@ -305,6 +305,30 @@ def _populate_base_root(root_path: Path, plugin_type: str, codename: str) -> boo
 # ---------------------------------------------------------------------------
 
 
+def _probe_repo(repo_cfg: dict, plugin: str, releasever: str = "", arch: str = "amd64") -> bool:
+    """Fetch the repo's repomd.xml before accepting it; lets the user drop dead repos."""
+    if plugin != "dnf":
+        return True
+    if not repo_cfg.get("baseurl"):
+        return True
+    ok = check_repo_url(
+        repo_cfg["baseurl"],
+        releasever=releasever,
+        basearch=repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64"),
+        sslcacert=repo_cfg.get("sslcacert"),
+        sslclientcert=repo_cfg.get("sslclientcert"),
+        sslclientkey=repo_cfg.get("sslclientkey"),
+    )
+    if ok:
+        return True
+    return bool(
+        questionary.confirm(
+            f"Repo '{repo_cfg.get('name')}' metadata check failed (unreachable or TLS). Add anyway?",
+            default=False,
+        ).ask()
+    )
+
+
 def _prompt_upstream_repos(
     plugin: str, distro_id: str = "", releasever: str = "", arch: str = "amd64"
 ) -> list[dict]:
@@ -390,9 +414,11 @@ def _prompt_upstream_repos(
                 for rendered in rendered_list:
                     if rendered.get("name") in known:
                         continue
-                    repos.append(rendered)
-                    rprint(f"[green]Repo added:[/] {rendered.get('name', '')}")
-                    rprint(f"[dim]  {rendered.get('baseurl', '')}[/dim]")
+                    if _probe_repo(rendered, plugin, releasever, arch):
+                        repos.append(rendered)
+                        rprint(f"[green]Repo added:[/] {rendered.get('name', '')}")
+                        rprint(f"[dim]  {rendered.get('baseurl', '')}[/dim]")
+            continue
         else:  # Add custom repo
             name = questionary.text("Repo name (short key):").ask()
             if not name:
@@ -418,7 +444,10 @@ def _prompt_upstream_repos(
                 gpgkey = questionary.text("GPG key URL (blank to skip):").ask() or ""
                 if gpgkey:
                     repo["gpgkey"] = gpgkey
-            repos.append(repo)
+            if _probe_repo(repo, plugin, releasever, arch):
+                repos.append(repo)
+                rprint(f"[green]Repo added:[/] {repo.get('name', '')}")
+                rprint(f"[dim]  {repo.get('baseurl') or repo.get('url', '')}[/dim]")
 
 
 def _prompt_apt_dnf_task(

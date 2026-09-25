@@ -57,6 +57,8 @@ def build_repo_opts(repos: list[dict], prefix: str = "syncit") -> list[str]:
 
 def check_repo_url(
     baseurl: str,
+    releasever: str = "",
+    basearch: str = "x86_64",
     sslcacert: str | None = None,
     sslclientcert: str | None = None,
     sslclientkey: str | None = None,
@@ -66,9 +68,15 @@ def check_repo_url(
     Probe a repo by fetching its repomd.xml. Returns True if reachable (2xx).
     Uses curl (same TLS behavior as dnf); entitlement certs are passed when
     provided so CDN repos probe correctly. GET (not HEAD) — some CDNs
-    (cdn.redhat.com) reject HEAD requests.
+    (cdn.redhat.com) reject HEAD requests. dnf variables in the URL are
+    expanded before probing (curl does not understand them).
     """
-    repomd = baseurl.rstrip("/") + "/repodata/repomd.xml"
+    expanded = (
+        baseurl.replace("$releasever", releasever or "$releasever")
+        .replace("$basearch", basearch or "$basearch")
+        .replace("$base", releasever or "$base")
+    )
+    repomd = expanded.rstrip("/") + "/repodata/repomd.xml"
     cmd = ["curl", "-sL", "-m", str(timeout), "-o", "/dev/null", "-w", "%{http_code}"]
     if sslcacert:
         cmd.extend(["--cacert", sslcacert])

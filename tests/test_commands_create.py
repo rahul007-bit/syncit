@@ -167,3 +167,60 @@ def test_create_cmd_interactive_workflow(
     assert loaded["spec"]["targets"]["codename"] == "9"
     assert len(loaded["spec"]["tasks"]) == 1
     assert loaded["spec"]["tasks"][0]["plugin"] == "oci_image"
+
+
+@patch("syncit.commands.create.get_catalog")
+@patch("questionary.select")
+@patch("questionary.text")
+@patch("questionary.confirm")
+@patch("questionary.checkbox")
+def test_create_cmd_update_mode_preserves_manifest(
+    mock_checkbox, mock_confirm, mock_text, mock_select, mock_get_catalog, tmp_path: Path
+) -> None:
+    """Update mode with 'Continue' must not rewrite tasks or unknown keys."""
+    manifest_path = tmp_path / "bundle.yaml"
+    existing = {
+        "apiVersion": "syncit/v1",
+        "kind": "Bundle",
+        "metadata": {"name": "edge-stack", "version": "2.1.0", "custom_note": "keep-me"},
+        "spec": {
+            "targets": {
+                "distro": "ubuntu",
+                "arch": "amd64",
+                "codename": "noble",
+                "extra_target": 1,
+            },
+            "unknown_section": {"future": True},
+            "tasks": [
+                {"name": "tools", "plugin": "apt", "packages": ["htop", "sl"]},
+                {"name": "imgs", "plugin": "oci_image", "images": ["nginx:1.29"]},
+            ],
+        },
+    }
+    manifest_path.write_text(json.dumps(existing))
+
+    mock_get_catalog.return_value = {}
+    mock_select.side_effect = [
+        MagicMock(ask=lambda: "Continue with current metadata"),  # metadata menu
+        MagicMock(ask=lambda: "Done"),  # What next?
+        MagicMock(ask=lambda: "none"),  # Run now?
+    ]
+    mock_text.side_effect = [
+        MagicMock(ask=lambda: str(manifest_path)),  # Save path
+    ]
+
+    with patch("syncit.commands.create.Console.print"):
+        create_cmd(manifest_path)
+
+    loaded = _load_manifest(manifest_path)
+    # Tasks preserved untouched
+    assert loaded["spec"]["tasks"] == existing["spec"]["tasks"]
+    # Unknown keys preserved
+    assert loaded["metadata"]["custom_note"] == "keep-me"
+    assert loaded["spec"]["unknown_section"] == {"future": True}
+    assert loaded["spec"]["targets"]["extra_target"] == 1
+    # Metadata untouched by Continue
+    assert loaded["metadata"]["name"] == "edge-stack"
+    assert loaded["metadata"]["version"] == "2.1.0"
+    assert loaded["spec"]["targets"]["distro"] == "ubuntu"
+    assert loaded["spec"]["targets"]["codename"] == "noble"

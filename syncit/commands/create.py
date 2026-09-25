@@ -1,3 +1,4 @@
+import copy
 import json
 import re
 import shutil
@@ -27,6 +28,15 @@ console = Console()
 
 DISTRO_CHOICES = ["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux", "Fedora", "Amazon Linux"]
 APT_DISTROS = {"Ubuntu", "Debian"}
+_DISTRO_TITLES = {
+    "ubuntu": "Ubuntu",
+    "debian": "Debian",
+    "rhel": "RHEL",
+    "rocky": "Rocky",
+    "almalinux": "AlmaLinux",
+    "amzn": "Amazon Linux",
+    "amazon linux": "Amazon Linux",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +381,38 @@ def _probe_repo(repo_cfg: dict, plugin: str, releasever: str = "", arch: str = "
             default=False,
         ).ask()
     )
+
+
+def _ensure_base_root(base_root_path: str, plugin_type: str, codename: str) -> str:
+    """Verify the base installroot is populated; offer to populate it.
+
+    An empty/unusable installroot produces wrong dependency resolution —
+    always require a populated minimal OS base (dnf @core / debootstrap).
+    Returns the (possibly empty) base root path.
+    """
+    if not base_root_path:
+        return ""
+    root_path = Path(base_root_path).expanduser().resolve()
+    populated = (
+        _dnf_root_populated(root_path) if plugin_type == "dnf" else _apt_root_populated(root_path)
+    )
+    if populated:
+        return base_root_path
+    tool = "dnf @core" if plugin_type == "dnf" else "debootstrap"
+    if questionary.confirm(
+        f"Base root '{root_path}' is empty or not populated. Populate it now with a minimal OS base ({tool})? (requires sudo)",
+        default=True,
+    ).ask():
+        ok = _populate_base_root(root_path, plugin_type, codename)
+        if not ok:
+            raise typer.Exit(1)
+        rprint(f"[green]Successfully populated {root_path}[/green]")
+    else:
+        rprint(
+            "[yellow]Continuing without a populated base root — "
+            "dependency resolution will be less accurate.[/yellow]"
+        )
+    return base_root_path
 
 
 def _task_summary(tasks: list) -> str:
@@ -913,192 +955,286 @@ def create_cmd(
     if manifest_file and manifest_file.exists():
         is_update = True
         existing = _load_manifest(manifest_file)
-        rprint(f"\n[bold cyan]Update mode:[/] loaded [green]{manifest_file}[/green]")
-        existing_tasks = existing.get("spec", {}).get("tasks", [])
-        if existing_tasks:
-            rprint(f"[dim]Existing tasks ({len(existing_tasks)}):[/dim]")
-            for t in existing_tasks:
-                rprint(f"  [dim]· {t.get('name', '?')} ({t.get('plugin', '?')})[/dim]")
-        rprint()
 
-    # ── Metadata prompts ──────────────────────────────────────────────────
-    rprint("\n[bold]Bundle Metadata[/bold]")
     meta = existing.get("metadata", {})
     targets = existing.get("spec", {}).get("targets", {})
+    tasks: list = list(existing.get("spec", {}).get("tasks", []))
 
     from syncit.wizard import history as wiz_history
 
-    bundle_name = wiz_history.prompt_with_history(
-        "bundle_name", "Bundle name:", default=meta.get("name", "")
-    )
-    if not bundle_name:
-        raise typer.Exit()
-
-    version = _require(
-        wiz_history.prompt_with_history(
-            "bundle_version", "Version:", default=meta.get("version", "1.0.0")
-        ),
-        "version",
-    )
-
-    existing_distro_raw = targets.get("distro", "")
-    mapping = {
-        "ubuntu": "Ubuntu",
-        "debian": "Debian",
-        "rhel": "RHEL",
-        "rocky": "Rocky",
-        "almalinux": "AlmaLinux",
-        "amzn": "Amazon Linux",
-        "amazon linux": "Amazon Linux",
-    }
-    existing_distro = mapping.get(existing_distro_raw.lower(), "")
-    detected_distro = _detect_distro()
-
-    if existing_distro:
-        default_distro = existing_distro
-    elif detected_distro:
-        default_distro = detected_distro
-    else:
-        default_distro = "Ubuntu"
-
-    distro_choice = _require(
-        questionary.select(
-            "Target distro:",
-            choices=DISTRO_CHOICES,
-            default=default_distro,
-        ).ask(),
-        "target distro",
-    )
-
-    # ── Codename with auto-detect + hints ────────────────────────────────
-    if distro_choice in APT_DISTROS:
-        detected = _detect_codename()
-        existing_codename = targets.get("codename", "")
-        default_codename = existing_codename or detected or "noble"
-
-        hints: list[str] = []
-        if detected:
-            hints.append(
-                f"  [cyan]{detected}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
-            )
-        if existing_codename and existing_codename != detected:
-            hints.append(f"  [cyan]{existing_codename}[/cyan]  [dim](current in file)[/dim]")
-        if hints:
-            rprint("[dim]Codename hints:[/dim]")
-            for h in hints:
-                rprint(h)
-
-        codename = _require(
-            wiz_history.prompt_with_history("codename", "Codename:", default=default_codename),
-            "codename",
-        )
-        plugin_type = "apt"
-    else:
-        codename = ""
-        plugin_type = "dnf"
-
-    existing_arch = targets.get("arch", "amd64")
-    arch = _require(
-        questionary.select(
-            "Architecture:",
-            choices=["amd64", "arm64"],
-            default=existing_arch if existing_arch in ("amd64", "arm64") else "amd64",
-        ).ask(),
-        "architecture",
-    )
-
-    # DNF releasever prompt (stored as codename to reuse manifest structure)
-    if plugin_type == "dnf":
-        detected_releasever = _detect_releasever()
-        existing_releasever = targets.get("codename", "")
-        default_releasever = existing_releasever or detected_releasever or "9"
-
-        hints: list[str] = []
-        if detected_releasever:
-            hints.append(
-                f"  [cyan]{detected_releasever}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
-            )
-        if existing_releasever and existing_releasever != detected_releasever:
-            hints.append(f"  [cyan]{existing_releasever}[/cyan]  [dim](current in file)[/dim]")
-        if hints:
-            rprint("[dim]Release version hints:[/dim]")
-            for h in hints:
-                rprint(h)
-
-        codename = _require(
-            wiz_history.prompt_with_history(
-                "releasever",
-                "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
-                default=default_releasever,
-            ),
-            "release version",
-        )
-
-    # Base installroot prompt
-    has_base = any("base_installroot" in t for t in existing.get("spec", {}).get("tasks", []))
-    enable_base = bool(
-        questionary.confirm(
-            "Enable base_installroot for accurate dependency resolution? (apt/dnf tasks)",
-            default=has_base,
-        ).ask()
-    )
-
-    base_root_path = ""
-    if enable_base:
-        existing_base = "/"
-        for t in existing.get("spec", {}).get("tasks", []):
-            if "base_installroot" in t:
-                existing_base = t["base_installroot"]
-                break
-        base_root_path = (
-            wiz_history.prompt_with_history(
-                "base_root",
-                "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):",
-                default=existing_base,
-            )
-            or ""
-        )
-
-        if base_root_path:
-            root_path = Path(base_root_path).expanduser().resolve()
-            populated = (
-                _dnf_root_populated(root_path)
-                if plugin_type == "dnf"
-                else _apt_root_populated(root_path)
-            )
-            # An empty/unusable installroot produces wrong dependency resolution
-            # — always require a populated minimal OS base (dnf @core / debootstrap).
-            if not populated:
-                tool = "dnf @core" if plugin_type == "dnf" else "debootstrap"
-                if questionary.confirm(
-                    f"Base root '{root_path}' is empty or not populated. Populate it now with a minimal OS base ({tool})? (requires sudo)",
-                    default=True,
-                ).ask():
-                    ok = _populate_base_root(root_path, plugin_type, codename)
-                    if not ok:
-                        raise typer.Exit(1)
-                    rprint(f"[green]Successfully populated {root_path}[/green]")
-                else:
-                    rprint(
-                        "[yellow]Continuing without a populated base root — "
-                        "dependency resolution will be less accurate.[/yellow]"
-                    )
-
-    # Carry forward existing tasks; new tasks appended in the loop below
-    tasks: list = list(existing.get("spec", {}).get("tasks", []))
-
-    # If the user chose NOT to enable base_installroot, we should strip it out
-    # from any existing tasks (the "disable" part of the feature).
-    if not enable_base:
+    if is_update:
+        # Preservative update mode: derive everything from the manifest, then
+        # offer per-field edits. Tasks and unknown manifest keys are never
+        # rewritten — only explicitly edited fields change.
+        distro_choice = targets.get("distro", "").lower()
+        codename = targets.get("codename", "")
+        plugin_type = "apt" if distro_choice in APT_DISTROS else "dnf"
+        arch = targets.get("arch", "amd64")
+        base_root_path = ""
         for t in tasks:
             if "base_installroot" in t:
-                del t["base_installroot"]
+                base_root_path = t["base_installroot"]
+                break
+
+        rprint(f"\n[bold cyan]Update mode:[/] loaded [green]{manifest_file}[/green]")
+        rprint("[dim]Existing tasks are preserved — only explicitly edited fields change.[/dim]")
+        rprint(f"[cyan][{_task_summary(tasks)}][/cyan]")
+
+        while True:
+            choice = questionary.select(
+                "Bundle metadata:",
+                choices=["Continue with current metadata", "Edit metadata", "Cancel"],
+            ).ask()
+            if choice == "Continue with current metadata":
+                break
+            if choice is None or choice == "Cancel":
+                raise typer.Exit()
+
+            while True:
+                field = questionary.select(
+                    "Edit metadata:",
+                    choices=[
+                        questionary.Choice(
+                            title=f"Bundle name  [{meta.get('name', '')}]", value="name"
+                        ),
+                        questionary.Choice(
+                            title=f"Version  [{meta.get('version', '')}]", value="version"
+                        ),
+                        questionary.Choice(
+                            title=f"Target distro  [{distro_choice or '?'}]", value="distro"
+                        ),
+                        questionary.Choice(title=f"Architecture  [{arch}]", value="arch"),
+                        questionary.Choice(
+                            title=f"Codename / releasever  [{codename or '-'}]", value="codename"
+                        ),
+                        questionary.Choice(
+                            title=f"base_installroot  [{base_root_path or 'disabled'}]",
+                            value="base_root",
+                        ),
+                        questionary.Choice(title="Back", value="back"),
+                    ],
+                ).ask()
+                if field is None or field == "back":
+                    break
+                if field == "name":
+                    new = wiz_history.prompt_with_history(
+                        "bundle_name", "Bundle name:", default=meta.get("name", "")
+                    )
+                    if new:
+                        meta["name"] = new
+                elif field == "version":
+                    new = wiz_history.prompt_with_history(
+                        "bundle_version", "Version:", default=meta.get("version", "1.0.0")
+                    )
+                    if new:
+                        meta["version"] = new
+                elif field == "distro":
+                    new = questionary.select(
+                        "Target distro:",
+                        choices=DISTRO_CHOICES,
+                        default=_DISTRO_TITLES.get(distro_choice, "Ubuntu"),
+                    ).ask()
+                    if new:
+                        distro_choice = new.lower()
+                        plugin_type = "apt" if distro_choice in APT_DISTROS else "dnf"
+                        if plugin_type == "apt":
+                            codename = _require(
+                                wiz_history.prompt_with_history(
+                                    "codename",
+                                    "Codename:",
+                                    default=codename or _detect_codename() or "noble",
+                                ),
+                                "codename",
+                            )
+                        else:
+                            codename = _require(
+                                wiz_history.prompt_with_history(
+                                    "releasever",
+                                    "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
+                                    default=codename or _detect_releasever() or "9",
+                                ),
+                                "release version",
+                            )
+                elif field == "arch":
+                    new = questionary.select(
+                        "Architecture:",
+                        choices=["amd64", "arm64"],
+                        default=arch if arch in ("amd64", "arm64") else "amd64",
+                    ).ask()
+                    if new:
+                        arch = new
+                elif field == "codename":
+                    if plugin_type == "apt":
+                        codename = _require(
+                            wiz_history.prompt_with_history(
+                                "codename",
+                                "Codename:",
+                                default=codename or _detect_codename() or "noble",
+                            ),
+                            "codename",
+                        )
+                    else:
+                        codename = _require(
+                            wiz_history.prompt_with_history(
+                                "releasever",
+                                "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
+                                default=codename or _detect_releasever() or "9",
+                            ),
+                            "release version",
+                        )
+                elif field == "base_root":
+                    enable_base = bool(
+                        questionary.confirm(
+                            "Enable base_installroot for accurate dependency resolution? (apt/dnf tasks)",
+                            default=bool(base_root_path),
+                        ).ask()
+                    )
+                    if enable_base:
+                        new = wiz_history.prompt_with_history(
+                            "base_root",
+                            "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):",
+                            default=base_root_path or "/",
+                        )
+                        base_root_path = _ensure_base_root(new or "", plugin_type, codename)
+                        if base_root_path:
+                            for t in tasks:
+                                if t.get("plugin") in ("apt", "dnf"):
+                                    t["base_installroot"] = base_root_path
+                    else:
+                        base_root_path = ""
+                        for t in tasks:
+                            if "base_installroot" in t:
+                                del t["base_installroot"]
+                        rprint("[yellow]base_installroot removed from all tasks.[/yellow]")
+
+        bundle_name = meta.get("name", "")
+        version = meta.get("version", "1.0.0")
+
     else:
-        # If enabled, inject into all existing apt/dnf tasks
-        if base_root_path:
+        # ── Fresh-create metadata prompts ─────────────────────────────────
+        rprint("\n[bold]Bundle Metadata[/bold]")
+
+        bundle_name = wiz_history.prompt_with_history(
+            "bundle_name", "Bundle name:", default=meta.get("name", "")
+        )
+        if not bundle_name:
+            raise typer.Exit()
+
+        version = _require(
+            wiz_history.prompt_with_history(
+                "bundle_version", "Version:", default=meta.get("version", "1.0.0")
+            ),
+            "version",
+        )
+
+        existing_distro = _DISTRO_TITLES.get(targets.get("distro", "").lower(), "")
+        detected_distro = _detect_distro()
+
+        if existing_distro:
+            default_distro = existing_distro
+        elif detected_distro:
+            default_distro = detected_distro
+        else:
+            default_distro = "Ubuntu"
+
+        distro_choice = _require(
+            questionary.select(
+                "Target distro:",
+                choices=DISTRO_CHOICES,
+                default=default_distro,
+            ).ask(),
+            "target distro",
+        )
+
+        # ── Codename with auto-detect + hints ────────────────────────────
+        if distro_choice in APT_DISTROS:
+            detected = _detect_codename()
+            existing_codename = targets.get("codename", "")
+            default_codename = existing_codename or detected or "noble"
+
+            hints: list[str] = []
+            if detected:
+                hints.append(
+                    f"  [cyan]{detected}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
+                )
+            if existing_codename and existing_codename != detected:
+                hints.append(f"  [cyan]{existing_codename}[/cyan]  [dim](current in file)[/dim]")
+            if hints:
+                rprint("[dim]Codename hints:[/dim]")
+                for h in hints:
+                    rprint(h)
+
+            codename = _require(
+                wiz_history.prompt_with_history("codename", "Codename:", default=default_codename),
+                "codename",
+            )
+            plugin_type = "apt"
+        else:
+            codename = ""
+            plugin_type = "dnf"
+
+        existing_arch = targets.get("arch", "amd64")
+        arch = _require(
+            questionary.select(
+                "Architecture:",
+                choices=["amd64", "arm64"],
+                default=existing_arch if existing_arch in ("amd64", "arm64") else "amd64",
+            ).ask(),
+            "architecture",
+        )
+
+        # DNF releasever prompt (stored as codename to reuse manifest structure)
+        if plugin_type == "dnf":
+            detected_releasever = _detect_releasever()
+            existing_releasever = targets.get("codename", "")
+            default_releasever = existing_releasever or detected_releasever or "9"
+
+            hints: list[str] = []
+            if detected_releasever:
+                hints.append(
+                    f"  [cyan]{detected_releasever}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
+                )
+            if existing_releasever and existing_releasever != detected_releasever:
+                hints.append(f"  [cyan]{existing_releasever}[/cyan]  [dim](current in file)[/dim]")
+            if hints:
+                rprint("[dim]Release version hints:[/dim]")
+                for h in hints:
+                    rprint(h)
+
+            codename = _require(
+                wiz_history.prompt_with_history(
+                    "releasever",
+                    "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
+                    default=default_releasever,
+                ),
+                "release version",
+            )
+
+        # Base installroot prompt
+        has_base = any("base_installroot" in t for t in tasks)
+        enable_base = bool(
+            questionary.confirm(
+                "Enable base_installroot for accurate dependency resolution? (apt/dnf tasks)",
+                default=has_base,
+            ).ask()
+        )
+
+        base_root_path = ""
+        if enable_base:
+            existing_base = "/"
             for t in tasks:
-                if t.get("plugin") in ("apt", "dnf"):
-                    t["base_installroot"] = base_root_path
+                if "base_installroot" in t:
+                    existing_base = t["base_installroot"]
+                    break
+            picked = (
+                wiz_history.prompt_with_history(
+                    "base_root",
+                    "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):",
+                    default=existing_base,
+                )
+                or ""
+            )
+            base_root_path = _ensure_base_root(picked, plugin_type, codename)
 
     # ── Task loop ─────────────────────────────────────────────────────────
     while True:
@@ -1246,23 +1382,29 @@ def create_cmd(
                         t["base_installroot"] = base_root_path
 
     # ── Build and save manifest ───────────────────────────────────────────
-    manifest = {
-        "apiVersion": "syncit/v1",
-        "kind": "Bundle",
-        "metadata": {
-            "name": bundle_name,
-            "version": version,
-        },
-        "spec": {
-            "targets": {
-                "distro": distro_choice.lower(),
-                "arch": arch,
-            },
-            "tasks": tasks,
-        },
-    }
+    # Preservative: start from the loaded manifest so unknown keys survive;
+    # only metadata.name/version, spec.targets and spec.tasks are written.
+    manifest: dict = (
+        copy.deepcopy(existing)
+        if existing
+        else {
+            "apiVersion": "syncit/v1",
+            "kind": "Bundle",
+            "metadata": {},
+            "spec": {},
+        }
+    )
+    manifest["metadata"]["name"] = bundle_name
+    manifest["metadata"]["version"] = version
+    spec = manifest.setdefault("spec", {})
+    spec_targets = spec.setdefault("targets", {})
+    spec_targets["distro"] = distro_choice.lower()
+    spec_targets["arch"] = arch
     if codename:
-        manifest["spec"]["targets"]["codename"] = codename
+        spec_targets["codename"] = codename
+    else:
+        spec_targets.pop("codename", None)
+    spec["tasks"] = tasks
 
     rprint("\n")
     default_save = str(manifest_file) if manifest_file else "bundle.yaml"

@@ -43,8 +43,21 @@
     gpgcheck: true
 
 - id: cri-o
-  label: CRI-O (pkgs.k8s.io)
-  description: CRI-O container runtime; published stable series lag K8s (1.31/1.32)
+  label: CRI-O (isv:cri-o)
+  description: CRI-O container runtime — stable series v1.34-v1.37 (project moved off pkgs.k8s.io, which froze at v1.32)
+  distros: [rhel, rocky, almalinux, centos]
+  vars:
+    crio_series:
+      prompt: CRI-O series (v1.34 - v1.37)
+      default: v1.34
+  repo:
+    baseurl: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/{crio_series}/rpm/
+    gpgkey: https://download.opensuse.org/repositories/isv:/cri-o:/stable:/{crio_series}/rpm/repodata/repomd.xml.key
+    gpgcheck: true
+
+- id: cri-o-legacy
+  label: CRI-O legacy (pkgs.k8s.io)
+  description: Old pkgs.k8s.io channel — stable series stopped at v1.32 (use isv:cri-o for newer)
   distros: [rhel, rocky, almalinux, centos]
   vars:
     crio_series:

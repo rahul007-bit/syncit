@@ -23,7 +23,7 @@
       default: v1.34
   repo:
     url: deb https://pkgs.k8s.io/core:/stable:/{k8s_series}/deb /
-    gpg_key: https://pkgs.k8s.io/core:/stable:/{k8s_series}/deb/repodata/repomd.xml.key
+    gpg_key: https://pkgs.k8s.io/core:/stable:/{k8s_series}/deb/Release.key
 
 - id: grafana
   label: Grafana

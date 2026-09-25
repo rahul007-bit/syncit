@@ -196,11 +196,20 @@ class AptPlugin(OfflinePlugin):
                             )
 
                 # Inject [trusted=yes] so apt doesn't require GPG verification during download only
-                # The GPG key is stored in the bundle for offline use / audit
+                # The GPG key is stored in the bundle for offline use / audit.
+                # If the key was downloaded successfully, also reference it via
+                # signed-by — modern apt ignores signed repos whose InRelease
+                # signature cannot be verified even with [trusted=yes].
+                key_dest = keys_dir / f"{name}.gpg"
                 entry = repo_url
                 if "[trusted=yes]" not in entry and "[trusted=yes" not in entry:
-                    # Insert after 'deb' (with or without options already)
-                    if entry.strip().startswith("deb ["):
+                    if gpg_key_url and (keys_dir / f"{name}.gpg").is_file():
+                        opts = f"trusted=yes signed-by={keys_dir / f'{name}.gpg'}"
+                        if entry.strip().startswith("deb ["):
+                            entry = entry.replace("deb [", f"deb [{opts} ", 1)
+                        else:
+                            entry = entry.replace("deb ", f"deb [{opts}] ", 1)
+                    elif entry.strip().startswith("deb ["):
                         # Already has options — insert trusted=yes
                         entry = entry.replace("deb [", "deb [trusted=yes ", 1)
                     else:

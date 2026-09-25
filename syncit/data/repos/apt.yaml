@@ -1,0 +1,124 @@
+# Curated upstream apt repositories for Ubuntu/Debian targets.
+#
+# Same schema as el.yaml, but repo config uses the apt plugin shape:
+#   url      full apt source line (deb http://... suite components)
+#   gpg_key  optional GPG key URL (downloaded by the apt plugin at pack time)
+#
+# `{codename}` is substituted from the bundle target (e.g. noble, jammy).
+- id: docker-ce
+  label: Docker CE
+  description: Official Docker Engine, CLI, containerd and Buildx from download.docker.com
+  distros: [ubuntu]
+  repo:
+    url: deb https://download.docker.com/linux/ubuntu {codename} stable
+    gpg_key: https://download.docker.com/linux/ubuntu/gpg
+
+- id: kubernetes
+  label: Kubernetes (pkgs.k8s.io)
+  description: Official kubeadm/kubelet/kubectl packages via pkgs.k8s.io
+  distros: [ubuntu, debian]
+  vars:
+    k8s_series:
+      prompt: Kubernetes series (e.g. v1.34)
+      default: v1.34
+  repo:
+    url: deb https://pkgs.k8s.io/core:/stable:/{k8s_series}/deb /
+    gpg_key: https://pkgs.k8s.io/core:/stable:/{k8s_series}/deb/repodata/repomd.xml.key
+
+- id: grafana
+  label: Grafana
+  description: Grafana OSS + Grafana Agent from apt.grafana.com
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://apt.grafana.com stable main
+    gpg_key: https://apt.grafana.com/gpg.key
+
+- id: pgdg
+  label: PostgreSQL PGDG
+  description: Official PostgreSQL (14-18) debs from apt.postgresql.org
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://apt.postgresql.org/pub/repos/apt {codename}-pgdg main
+    gpg_key: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+
+- id: nginx
+  label: nginx (official)
+  description: nginx stable packages from nginx.org
+  distros: [ubuntu]
+  repo:
+    url: deb https://nginx.org/packages/ubuntu {codename} nginx
+    gpg_key: https://nginx.org/keys/nginx_signing.key
+
+- id: redis
+  label: Redis (official)
+  description: Redis server/stack from packages.redis.io
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://packages.redis.io/deb {codename} main
+    gpg_key: https://packages.redis.io/gpg
+
+- id: rabbitmq
+  label: RabbitMQ Server
+  description: RabbitMQ messaging server from the official packagecloud repo
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://packagecloud.io/rabbitmq/rabbitmq-server/ubuntu {codename} main
+    gpg_key: https://packagecloud.io/rabbitmq/rabbitmq-server/gpgkey
+
+- id: rabbitmq-erlang
+  label: Erlang (for RabbitMQ)
+  description: Modern Erlang runtime required by RabbitMQ
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://packagecloud.io/rabbitmq/erlang/ubuntu {codename} main
+    gpg_key: https://packagecloud.io/rabbitmq/erlang/gpgkey
+
+- id: clickhouse
+  label: ClickHouse
+  description: ClickHouse OLAP database from packages.clickhouse.com (stable)
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://packages.clickhouse.com/deb stable main
+
+- id: elasticsearch
+  label: Elastic Stack
+  description: Elasticsearch, Logstash, Kibana from artifacts.elastic.co (prompts 9.x/8.x)
+  distros: [ubuntu, debian]
+  vars:
+    elastic_ver:
+      prompt: Elastic major (e.g. 9.x, 8.x)
+      default: 9.x
+  repo:
+    url: deb https://artifacts.elastic.co/packages/{elastic_ver}/apt stable main
+    gpg_key: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+- id: hashicorp
+  label: HashiCorp
+  description: Vault, Terraform, Consul, Nomad official debs
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://apt.releases.hashicorp.com {codename} main
+    gpg_key: https://apt.releases.hashicorp.com/gpg
+
+- id: mongodb-org
+  label: MongoDB (official)
+  description: MongoDB server 8.0 from repo.mongodb.org
+  distros: [ubuntu]
+  repo:
+    url: deb https://repo.mongodb.org/apt/ubuntu {codename}/mongodb-org/8.0 multiverse
+    gpg_key: https://www.mongodb.org/static/pgp/server-8.0.asc
+
+- id: influxdata
+  label: InfluxData
+  description: InfluxDB, Telegraf, Chronograf from repos.influxdata.com
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://repos.influxdata.com/ubuntu stable main
+    gpg_key: https://repos.influxdata.com/influxdata-archive.key
+
+- id: nodesource
+  label: Node.js (NodeSource)
+  description: Node.js 22.x LTS from deb.nodesource.com
+  distros: [ubuntu, debian]
+  repo:
+    url: deb https://deb.nodesource.com/node_22.x nodistro main

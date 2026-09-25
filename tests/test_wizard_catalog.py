@@ -29,8 +29,32 @@ def test_load_repos_excludes_unsupported():
 
 
 def test_load_repos_unknown_distro_returns_empty():
-    assert rc.load_repos("ubuntu") == []
+    assert rc.load_repos("arch") == []
     assert rc.load_repos("") == []
+
+
+def test_load_repos_ubuntu_apt_catalog():
+    repos = rc.load_repos("ubuntu")
+    ids = {r["id"] for r in repos}
+    assert "docker-ce" in ids
+    assert "kubernetes" in ids
+    assert "pgdg" in ids
+
+
+def test_render_apt_repo_substitutes_codename():
+    entry = next(r for r in rc.load_repos("ubuntu") if r["id"] == "docker-ce")
+    out = rc.render_entry_repos(entry, "ubuntu", releasever="noble", basearch="amd64")
+    assert out[0]["url"] == "deb https://download.docker.com/linux/ubuntu noble stable"
+    assert out[0]["gpg_key"] == "https://download.docker.com/linux/ubuntu/gpg"
+    assert out[0]["name"] == "docker-ce"
+
+
+def test_render_apt_repo_kubernetes_var():
+    entry = next(r for r in rc.load_repos("ubuntu") if r["id"] == "kubernetes")
+    out = rc.render_entry_repos(
+        entry, "ubuntu", releasever="noble", basearch="amd64", values={"k8s_series": "v1.31"}
+    )
+    assert out[0]["url"] == "deb https://pkgs.k8s.io/core:/stable:/v1.31/deb /"
 
 
 def test_render_repo_substitutes_releasever_and_basearch():

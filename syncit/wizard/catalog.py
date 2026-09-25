@@ -23,6 +23,8 @@ _DISTRO_TO_FILE: dict[str, str] = {
     "almalinux": "el",
     "centos": "el",
     "fedora": "fedora",
+    "ubuntu": "apt",
+    "debian": "apt",
 }
 
 # manifest arch (amd64/arm64) -> RPM basearch
@@ -96,6 +98,8 @@ def render_repo(
         "releasever": releasever,
         "basearch": basearch,
         "distro": distro_id,
+        # apt targets: releasever carries the codename (noble, trixie, ...)
+        "codename": releasever,
         **(values or {}),
     }
     rendered = {k: substitute_vars(v, subs) if isinstance(v, str) else v for k, v in repo.items()}

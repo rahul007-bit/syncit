@@ -335,9 +335,7 @@ def _prompt_upstream_repos(
     """Interactive multi-repo picker: curated catalog (dnf) + custom entries."""
     repos: list[dict] = []
     while True:
-        choices = []
-        if plugin == "dnf":
-            choices.append("Browse popular repos (curated catalog)")
+        choices = ["Browse popular repos (curated catalog)"]
         if repos:
             choices.append("Remove added repo(s)")
         choices += ["Add custom repo", f"Done ({len(repos)} repo(s))"]
@@ -419,6 +417,8 @@ def _prompt_upstream_repos(
                         )
                 else:
                     values: dict[str, str] = {}
+                    if plugin == "apt" and releasever:
+                        values["codename"] = releasever
                     for var_name, spec in (entry.get("vars") or {}).items():
                         ans = questionary.text(
                             spec.get("prompt", f"{var_name}:"),

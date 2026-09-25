@@ -169,6 +169,61 @@ def list_tags(repo: str, limit: int = 30) -> list[str]:
     return tags
 
 
+def _looks_like_ref(term: str) -> bool:
+    """True when the term is a full image reference rather than a search term
+    (has a tag — 'x/y:tag' — or a registry host — 'registry.k8s.io/...')."""
+    term = term.strip()
+    if not term:
+        return False
+    first = term.split("/")[0]
+    if "." in first or first == "localhost":
+        return True
+    if ":" in term.rsplit("/", 1)[-1]:
+        return True
+    return False
+
+
+def _handle_full_ref(term: str, selected: list[str]) -> None:
+    """User pasted a complete image ref — resolve tags on the right registry."""
+    from syncit.wizard.registries import (
+        OciV2Registry,
+        REGISTRY_ADAPTERS,
+        format_ref,
+        parse_image_ref,
+    )
+
+    registry, repo, tag = parse_image_ref(term)
+    if tag:
+        ref = format_ref(registry, repo, tag)
+        if ref not in selected:
+            selected.append(ref)
+        rprint(f"[green]Added:[/] {ref}")
+        return
+    adapter = REGISTRY_ADAPTERS.get(registry)
+    if adapter is None:
+        adapter = OciV2Registry(registry)
+    tags = adapter.tags(repo)
+    if not tags:
+        ref = format_ref(registry, repo, None)
+        entered = questionary.text(f"Tag for {ref} (blank = no tag):").ask()
+        if entered is None:
+            return
+        ref = format_ref(registry, repo, entered.strip() or None)
+        if ref not in selected:
+            selected.append(ref)
+            rprint(f"[green]Added:[/] {ref}")
+        return
+    chosen = questionary.select(
+        f"Tag for {registry}/{repo}:",
+        choices=[questionary.Choice(title=t, value=t) for t in tags],
+    ).ask()
+    if chosen:
+        ref = format_ref(registry, repo, chosen)
+        if ref not in selected:
+            selected.append(ref)
+            rprint(f"[green]Added:[/] {ref}")
+
+
 def _apply_sort(items: list[tuple[str, str]], mode: str, term: str) -> list[tuple[str, str]]:
     from syncit.wizard.ranking import rank_matches
 
@@ -218,9 +273,14 @@ def browse_oci_images(
 
     def _search_round() -> None:
         while True:
-            term = questionary.text(f"Search {prompt_label} (image name, blank to finish):").ask()
+            term = questionary.text(
+                f"Search {prompt_label} or paste a full image ref (blank to finish):"
+            ).ask()
             if not term or not term.strip():
                 break
+            if _looks_like_ref(term):
+                _handle_full_ref(term, selected)
+                continue
             page = 1
             fetched: set[str] = set()
             while True:

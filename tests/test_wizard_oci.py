@@ -218,3 +218,41 @@ def test_registry_adapters_configured():
     assert ghcr.token_service == "ghcr.io"
     assert "kube-apiserver" in REGISTRY_ADAPTERS["registry.k8s.io"].quick_repos()
     assert REGISTRY_ADAPTERS["quay.io"].supports_search is True
+
+
+# ── Full-ref detection in the search prompt ──────────────────────────────
+
+
+def test_looks_like_ref_detection():
+    from syncit.wizard.oci_browser import _looks_like_ref
+
+    assert _looks_like_ref("registry.k8s.io/pause:latest") is True
+    assert _looks_like_ref("quay.io/org/app") is True
+    assert _looks_like_ref("nginx:1.29") is True
+    assert _looks_like_ref("nginx") is False
+    assert _looks_like_ref("bitnami/redis") is False  # still a search term
+    assert _looks_like_ref("") is False
+
+
+def test_handle_full_ref_with_tag(monkeypatch, capsys):
+    from syncit.wizard.oci_browser import _handle_full_ref
+
+    selected: list[str] = []
+    _handle_full_ref("registry.k8s.io/pause:latest", selected)
+    assert "registry.k8s.io/pause:latest" in selected
+
+
+def test_handle_full_ref_without_tag_prompts_tag_picker(monkeypatch):
+    from syncit.wizard import oci_browser as ob
+
+    monkeypatch.setattr(
+        "syncit.wizard.registries._get_json",
+        lambda url, headers=None, timeout=30: {"tags": ["v1.37.1", "v1.34.2"]},
+    )
+    monkeypatch.setattr(
+        "syncit.wizard.registries.questionary.select",
+        lambda *a, **k: type("Q", (), {"ask": lambda self: "v1.37.1"})(),
+    )
+    selected: list[str] = []
+    ob._handle_full_ref("registry.k8s.io/kube-apiserver", selected)
+    assert "registry.k8s.io/kube-apiserver:v1.37.1" in selected

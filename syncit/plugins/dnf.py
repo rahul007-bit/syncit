@@ -180,6 +180,11 @@ class DnfPlugin(OfflinePlugin):
                 # Enable only our injected repos; disable all system repos so
                 # the build host's /etc/yum.repos.d/ doesn't interfere.
                 extra_repo_opts.extend(["--enablerepo", name])
+                # Pack downloads are signature-unverified (keys are only
+                # relevant at apply time; the offline bundle repo uses
+                # gpgcheck=0). repofrompath repos have no gpgkey configured,
+                # so force gpgcheck off to avoid signature-check failures.
+                extra_repo_opts.extend(["--setopt", f"{name}.gpgcheck=0"])
                 if ctx.verbose:
                     print(f"    [dnf] Added repo '{name}' ({baseurl})")
 

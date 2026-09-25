@@ -30,7 +30,9 @@ def fetch_package(name: str, timeout: int = 30) -> dict[str, Any] | None:
         return None
     versions = list(data.get("releases", {}).keys())
 
-    # Sort newest-first using a numeric-aware key (best effort, stdlib only)
+    # Sort newest-first using a numeric-aware key (best effort, stdlib only).
+    # Pre-release chunks (e.g. ".dev1", "0rc1") sort below the corresponding
+    # stable numeric chunk.
     def vkey(v: str) -> tuple:
         parts = []
         for chunk in v.replace("-", ".").split("."):
@@ -40,7 +42,11 @@ def fetch_package(name: str, timeout: int = 30) -> dict[str, Any] | None:
                     digits += ch
                 else:
                     break
-            parts.append((int(digits or 0), chunk))
+            if digits:
+                parts.append((1, int(digits), chunk))
+            else:
+                # non-numeric chunk: always sorts below numeric chunks
+                parts.append((0, 0, chunk))
         return tuple(parts)
 
     versions.sort(key=vkey, reverse=True)

@@ -21,6 +21,7 @@ TEST_IMAGES = [
     "quay.io/libpod/alpine:latest",
 ]
 
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def run(cmd, **kw):
     print(f"  $ {' '.join(cmd)}")
@@ -31,14 +32,25 @@ def run(cmd, **kw):
         print(f"    stderr: {r.stderr.strip()[:200]}")
     return r
 
-def section(title):
-    print(f"\n{'='*60}")
-    print(f"  {title}")
-    print(f"{'='*60}")
 
-def ok(msg):   print(f"  ✅  {msg}")
-def fail(msg): print(f"  ❌  {msg}"); sys.exit(1)
-def warn(msg): print(f"  ⚠️   {msg}")
+def section(title):
+    print(f"\n{'=' * 60}")
+    print(f"  {title}")
+    print(f"{'=' * 60}")
+
+
+def ok(msg):
+    print(f"  ✅  {msg}")
+
+
+def fail(msg):
+    print(f"  ❌  {msg}")
+    sys.exit(1)
+
+
+def warn(msg):
+    print(f"  ⚠️   {msg}")
+
 
 # ── 1. PACK ──────────────────────────────────────────────────────────────────
 section("PACK: skopeo copy each image to oci-archive")
@@ -50,8 +62,10 @@ print(f"  Working dir: {tmpdir}")
 
 manifest = []
 
+
 def safe_name(src):
     return src.replace("/", "_").replace(":", "_")
+
 
 has_skopeo = shutil.which("skopeo") is not None
 has_podman = shutil.which("podman") is not None
@@ -95,7 +109,7 @@ for entry in manifest:
 unique_sizes = len(set(sizes.values()))
 print(f"  Archive sizes:")
 for src, sz in sizes.items():
-    print(f"    {src}: {sz/1024/1024:.1f} MB")
+    print(f"    {src}: {sz / 1024 / 1024:.1f} MB")
 
 if unique_sizes == 1 and len(TEST_IMAGES) > 1:
     fail("ALL tars are the same size — likely collapsed duplicate (the 87MB bug!)")

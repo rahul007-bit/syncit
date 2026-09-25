@@ -14,11 +14,12 @@ from syncit.commands.create import (
     create_cmd,
 )
 
+
 def test_detect_codename(tmp_path: Path) -> None:
     # 1. Successful detect
     fake_os_release = tmp_path / "os-release"
     fake_os_release.write_text('VERSION_CODENAME="noble"\n')
-    
+
     with patch("builtins.open", return_value=open(fake_os_release)):
         assert _detect_codename() == "noble"
 
@@ -36,10 +37,10 @@ def test_detect_releasever(tmp_path: Path) -> None:
     # 2. DNF fails, fallback to VERSION_ID in os-release
     fake_os_release = tmp_path / "os-release"
     fake_os_release.write_text('VERSION_ID="9.4"\n')
-    
+
     def mock_run_fail(*args, **kwargs):
         raise Exception("no dnf")
-        
+
     with patch("subprocess.run", side_effect=mock_run_fail):
         with patch("builtins.open", return_value=open(fake_os_release)):
             assert _detect_releasever() == "9"
@@ -71,7 +72,7 @@ def test_load_dump_manifest(tmp_path: Path) -> None:
     manifest_path = tmp_path / "bundle.yaml"
     data = {"apiVersion": "syncit/v1", "kind": "Bundle", "metadata": {"name": "test"}}
     _dump_manifest(data, manifest_path)
-    
+
     loaded = _load_manifest(manifest_path)
     assert loaded == data
 
@@ -101,13 +102,19 @@ def test_create_cmd_interactive_workflow(
                 "packages": {
                     "label": "postgresql",
                     "required": True,
-                    "templates": {"any": {"name": "PostgreSQL Images", "plugin": "oci_image", "images": ["postgres:alpine"]}}
+                    "templates": {
+                        "any": {
+                            "name": "PostgreSQL Images",
+                            "plugin": "oci_image",
+                            "images": ["postgres:alpine"],
+                        }
+                    },
                 }
-            }
+            },
         }
     }
 
-    # Simulate: 
+    # Simulate:
     # - New bundle
     # - Distro: Rocky
     # - Releasever: 9
@@ -115,25 +122,25 @@ def test_create_cmd_interactive_workflow(
     # - Add from catalog? Yes
     # Simulate Rocky distro (non-APT), no base_installroot, adding postgresql from catalog, then saving and exiting.
     mock_select.side_effect = [
-        MagicMock(ask=lambda: "Rocky"),                   # Select 1: Distro Choice
-        MagicMock(ask=lambda: "amd64"),                   # Select 2: Arch
-        MagicMock(ask=lambda: "Search catalog"),          # Select 3: What next?
-        MagicMock(ask=lambda: "postgresql"),              # Select 4: Catalog search selection
-        MagicMock(ask=lambda: "latest"),                  # Select 5: Version selection
-        MagicMock(ask=lambda: "Done"),                    # Select 6: What next? (breaks loop)
-        MagicMock(ask=lambda: "none"),                    # Select 7: Run choice
+        MagicMock(ask=lambda: "Rocky"),  # Select 1: Distro Choice
+        MagicMock(ask=lambda: "amd64"),  # Select 2: Arch
+        MagicMock(ask=lambda: "Search catalog"),  # Select 3: What next?
+        MagicMock(ask=lambda: "postgresql"),  # Select 4: Catalog search selection
+        MagicMock(ask=lambda: "latest"),  # Select 5: Version selection
+        MagicMock(ask=lambda: "Done"),  # Select 6: What next? (breaks loop)
+        MagicMock(ask=lambda: "none"),  # Select 7: Run choice
     ]
 
     mock_text.side_effect = [
-        MagicMock(ask=lambda: "test-rocky"),              # Text 1: Bundle Name
-        MagicMock(ask=lambda: "1.0.0"),                   # Text 2: Bundle Version
-        MagicMock(ask=lambda: "9"),                       # Text 3: Release version
+        MagicMock(ask=lambda: "test-rocky"),  # Text 1: Bundle Name
+        MagicMock(ask=lambda: "1.0.0"),  # Text 2: Bundle Version
+        MagicMock(ask=lambda: "9"),  # Text 3: Release version
         MagicMock(ask=lambda: str(tmp_path / "bundle.yaml")),  # Text 4: Save file path
     ]
 
     mock_confirm.side_effect = [
-        MagicMock(ask=lambda: False),                      # Confirm 1: Enable base_installroot?
-        MagicMock(ask=lambda: False),                      # Confirm 2: Add another?
+        MagicMock(ask=lambda: False),  # Confirm 1: Enable base_installroot?
+        MagicMock(ask=lambda: False),  # Confirm 2: Add another?
     ]
 
     with patch("syncit.commands.create.Console.print"):
@@ -141,7 +148,7 @@ def test_create_cmd_interactive_workflow(
 
     save_file = tmp_path / "bundle.yaml"
     assert save_file.exists()
-    
+
     # Read saved manifest
     loaded = _load_manifest(save_file)
     assert loaded["metadata"]["name"] == "test-rocky"

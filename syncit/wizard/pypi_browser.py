@@ -91,7 +91,7 @@ def resolve_pip_deps(spec: str, python_version: str = "") -> list[dict[str, str]
             if res.returncode == 0 and report.exists():
                 break
         if res is None or res.returncode != 0 or not report.exists():
-            last = (res.stderr or res.stdout or "").strip().splitlines()
+            last = ((res.stderr if res else "") or (res.stdout if res else "")).strip().splitlines()
             rprint("[yellow]pip dependency resolution failed:[/yellow]")
             for line in last[-4:]:
                 rprint(f"[dim]  {line}[/dim]")

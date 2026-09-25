@@ -105,10 +105,14 @@ def test_dnf_validate_edge_cases() -> None:
         errors = plugin.validate({"packages": ["nginx"], "repos": ["not-a-dict"]})
         assert any("repos[0] must be an object" in e for e in errors)
 
-        errors = plugin.validate({"packages": ["nginx"], "repos": [{"name": 123, "baseurl": "http://foo"}]})
+        errors = plugin.validate(
+            {"packages": ["nginx"], "repos": [{"name": 123, "baseurl": "http://foo"}]}
+        )
         assert any("missing required string field: 'name'" in e for e in errors)
 
-        errors = plugin.validate({"packages": ["nginx"], "repos": [{"name": "repo", "baseurl": 123}]})
+        errors = plugin.validate(
+            {"packages": ["nginx"], "repos": [{"name": "repo", "baseurl": 123}]}
+        )
         assert any("missing required string field: 'baseurl'" in e for e in errors)
 
 
@@ -135,11 +139,15 @@ def test_dnf_validate_gpgkey_download_missing() -> None:
     plugin = DnfPlugin()
 
     # Test curl and wget missing when gpgkey is specified
-    with patch("shutil.which", side_effect=lambda x: "path" if x in ["dnf", "createrepo_c"] else None):
-        errors = plugin.validate({
-            "packages": ["nginx"],
-            "repos": [{"name": "foo", "baseurl": "http://bar", "gpgkey": "http://key"}]
-        })
+    with patch(
+        "shutil.which", side_effect=lambda x: "path" if x in ["dnf", "createrepo_c"] else None
+    ):
+        errors = plugin.validate(
+            {
+                "packages": ["nginx"],
+                "repos": [{"name": "foo", "baseurl": "http://bar", "gpgkey": "http://key"}],
+            }
+        )
         assert any("has 'gpgkey' but neither 'curl' nor 'wget' is installed" in e for e in errors)
 
 
@@ -147,20 +155,16 @@ def test_dnf_diff() -> None:
     plugin = DnfPlugin()
 
     # Old spec is None
-    diff_res = plugin.diff(None, {"packages": ["nginx"], "repos": [{"name": "foo", "baseurl": "http://bar"}]})
+    diff_res = plugin.diff(
+        None, {"packages": ["nginx"], "repos": [{"name": "foo", "baseurl": "http://bar"}]}
+    )
     assert "[repo] foo (http://bar)" in diff_res.added
     assert "nginx" in diff_res.added
     assert not diff_res.removed
 
     # Comparing specs with added and removed packages/repos
-    old_spec = {
-        "packages": ["nginx", "curl"],
-        "repos": [{"name": "foo", "baseurl": "http://bar"}]
-    }
-    new_spec = {
-        "packages": ["nginx", "wget"],
-        "repos": [{"name": "baz", "baseurl": "http://qux"}]
-    }
+    old_spec = {"packages": ["nginx", "curl"], "repos": [{"name": "foo", "baseurl": "http://bar"}]}
+    new_spec = {"packages": ["nginx", "wget"], "repos": [{"name": "baz", "baseurl": "http://qux"}]}
     diff_res = plugin.diff(old_spec, new_spec)
     assert "[repo] baz (http://qux)" in diff_res.added
     assert "wget" in diff_res.added
@@ -177,14 +181,19 @@ def test_dnf_render_apply_sh() -> None:
 
 @patch("syncit.plugins.dnf._run_cmd")
 @patch("subprocess.run")
-def test_dnf_pack_caching_hit_and_atomic_promotion(mock_sub_run, mock_run_cmd, tmp_path: Path, monkeypatch) -> None:
+def test_dnf_pack_caching_hit_and_atomic_promotion(
+    mock_sub_run, mock_run_cmd, tmp_path: Path, monkeypatch
+) -> None:
     cache_root = tmp_path / "cache"
     dnf_cache = cache_root / "dnf"
     rpm_cache = cache_root / "dnf-rpms"
     dnf_cache.mkdir(parents=True)
     rpm_cache.mkdir(parents=True)
 
-    monkeypatch.setattr("syncit.plugins.dnf.Path.expanduser", lambda self: cache_root / self.name if "cache/syncit" in str(self) else self)
+    monkeypatch.setattr(
+        "syncit.plugins.dnf.Path.expanduser",
+        lambda self: cache_root / self.name if "cache/syncit" in str(self) else self,
+    )
 
     # Pre-populate cache with valid nginx.rpm
     cached_rpm = rpm_cache / "nginx-1.20.rpm"
@@ -227,12 +236,17 @@ def test_dnf_pack_caching_hit_and_atomic_promotion(mock_sub_run, mock_run_cmd, t
 
 @patch("syncit.plugins.dnf._run_cmd")
 @patch("subprocess.run")
-def test_dnf_pack_caching_corrupted_removal(mock_sub_run, mock_run_cmd, tmp_path: Path, monkeypatch) -> None:
+def test_dnf_pack_caching_corrupted_removal(
+    mock_sub_run, mock_run_cmd, tmp_path: Path, monkeypatch
+) -> None:
     cache_root = tmp_path / "cache"
     rpm_cache = cache_root / "dnf-rpms"
     rpm_cache.mkdir(parents=True)
 
-    monkeypatch.setattr("syncit.plugins.dnf.Path.expanduser", lambda self: cache_root / self.name if "cache/syncit" in str(self) else self)
+    monkeypatch.setattr(
+        "syncit.plugins.dnf.Path.expanduser",
+        lambda self: cache_root / self.name if "cache/syncit" in str(self) else self,
+    )
 
     # Pre-populate cache with corrupted rpm
     corrupted_rpm = rpm_cache / "bad-pkg.rpm"
@@ -261,7 +275,9 @@ def test_dnf_pack_caching_corrupted_removal(mock_sub_run, mock_run_cmd, tmp_path
 
 @patch("syncit.plugins.dnf._run_cmd")
 @patch("subprocess.run")
-def test_dnf_pack_no_cache_clears_dirs(mock_sub_run, mock_run_cmd, tmp_path: Path, monkeypatch) -> None:
+def test_dnf_pack_no_cache_clears_dirs(
+    mock_sub_run, mock_run_cmd, tmp_path: Path, monkeypatch
+) -> None:
     cache_root = tmp_path / "cache"
     dnf_cache = cache_root / "dnf"
     rpm_cache = cache_root / "dnf-rpms"
@@ -270,13 +286,18 @@ def test_dnf_pack_no_cache_clears_dirs(mock_sub_run, mock_run_cmd, tmp_path: Pat
     (dnf_cache / "old-meta").touch()
     (rpm_cache / "old.rpm").touch()
 
-    monkeypatch.setattr("syncit.plugins.dnf.Path.expanduser", lambda self: cache_root / self.name if "cache/syncit" in str(self) else self)
+    monkeypatch.setattr(
+        "syncit.plugins.dnf.Path.expanduser",
+        lambda self: cache_root / self.name if "cache/syncit" in str(self) else self,
+    )
     mock_sub_run.return_value = MagicMock(returncode=0, stdout="")
     mock_run_cmd.return_value = MagicMock(returncode=0)
 
     plugin = DnfPlugin()
     bundle_dir = tmp_path / "bundle"
-    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="dnf", no_cache=True, verbose=True)
+    ctx = PackContext(
+        bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="dnf", no_cache=True, verbose=True
+    )
 
     res = plugin.pack({"packages": ["nginx"]}, ctx)
     assert res.success
@@ -293,17 +314,23 @@ def test_dnf_pack_installroot_copy_pki(mock_sub_run, mock_run_cmd, tmp_path: Pat
 
     installroot = tmp_path / "ir"
     installroot.mkdir()
-    
+
     # Create fake host PKI directory
     host_gpg = tmp_path / "etc/pki/rpm-gpg"
     host_gpg.mkdir(parents=True)
     (host_gpg / "RPM-GPG-KEY-test").touch()
 
     original_path = Path
+
     class MockPath(original_path):
         def __new__(cls, *args, **kwargs):
             path_str = str(args[0])
-            if path_str in ["/etc/pki/entitlement", "/etc/rhsm", "/etc/yum.repos.d", "/etc/pki/rpm-gpg"]:
+            if path_str in [
+                "/etc/pki/entitlement",
+                "/etc/rhsm",
+                "/etc/yum.repos.d",
+                "/etc/pki/rpm-gpg",
+            ]:
                 if path_str == "/etc/pki/rpm-gpg":
                     return original_path(str(host_gpg))
                 return original_path(str(tmp_path / "nonexistent"))
@@ -312,7 +339,9 @@ def test_dnf_pack_installroot_copy_pki(mock_sub_run, mock_run_cmd, tmp_path: Pat
     with patch("syncit.plugins.dnf.Path", new=MockPath):
         plugin = DnfPlugin()
         bundle_dir = tmp_path / "bundle"
-        ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="dnf", verbose=True)
+        ctx = PackContext(
+            bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="dnf", verbose=True
+        )
         res = plugin.pack({"packages": ["nginx"], "base_installroot": str(installroot)}, ctx)
 
     assert res.success
@@ -323,7 +352,7 @@ def test_dnf_pack_installroot_copy_pki(mock_sub_run, mock_run_cmd, tmp_path: Pat
 @patch("subprocess.Popen")
 def test_run_cmd_verbose_streaming(mock_popen) -> None:
     from syncit.plugins.dnf import _run_cmd
-    
+
     mock_proc = MagicMock()
     mock_proc.stdout = ["line1\n", "line2\n"]
     mock_proc.returncode = 0
@@ -355,7 +384,13 @@ def test_dnf_pack_with_repos(mock_sub_run, mock_run_cmd, tmp_path: Path) -> None
 
     spec = {
         "packages": ["nginx"],
-        "repos": [{"name": "custom-repo", "baseurl": "https://example.com/repo", "gpgkey": "https://example.com/key"}]
+        "repos": [
+            {
+                "name": "custom-repo",
+                "baseurl": "https://example.com/repo",
+                "gpgkey": "https://example.com/key",
+            }
+        ],
     }
     res = plugin.pack(spec, ctx)
     assert res.success
@@ -366,12 +401,14 @@ def test_dnf_pack_with_repos(mock_sub_run, mock_run_cmd, tmp_path: Path) -> None
 @patch("subprocess.run")
 @patch("sys.stdout.isatty", return_value=True)
 @patch("questionary.confirm")
-def test_dnf_pack_rhel_fallback_retry(mock_confirm, mock_isatty, mock_sub_run, mock_run_cmd, tmp_path: Path) -> None:
+def test_dnf_pack_rhel_fallback_retry(
+    mock_confirm, mock_isatty, mock_sub_run, mock_run_cmd, tmp_path: Path
+) -> None:
     # First download fails with "nothing provides", retry succeeds, createrepo succeeds
     mock_run_cmd.side_effect = [
         MagicMock(returncode=1, stderr="nothing provides some-dep"),
-        MagicMock(returncode=0), # Retry succeeds
-        MagicMock(returncode=0)  # createrepo_c succeeds
+        MagicMock(returncode=0),  # Retry succeeds
+        MagicMock(returncode=0),  # createrepo_c succeeds
     ]
     mock_sub_run.return_value = MagicMock(returncode=0, stdout="")
     mock_confirm.return_value = MagicMock(ask=lambda: True)
@@ -379,7 +416,13 @@ def test_dnf_pack_rhel_fallback_retry(mock_confirm, mock_isatty, mock_sub_run, m
     plugin = DnfPlugin()
     bundle_dir = tmp_path / "bundle"
     # Ensure targets distro is RHEL
-    ctx = PackContext(bundle_dir=bundle_dir, manifest_dir=tmp_path, task_slug="dnf", verbose=True, targets={"distro": "rhel"})
+    ctx = PackContext(
+        bundle_dir=bundle_dir,
+        manifest_dir=tmp_path,
+        task_slug="dnf",
+        verbose=True,
+        targets={"distro": "rhel"},
+    )
 
     res = plugin.pack({"packages": ["nginx"]}, ctx)
     assert res.success
@@ -396,7 +439,7 @@ def test_dnf_pack_createrepo_fail(mock_sub_run, mock_run_cmd, tmp_path: Path) ->
     # First command (dnf download) succeeds, second command (createrepo_c) fails
     mock_run_cmd.side_effect = [
         MagicMock(returncode=0),
-        MagicMock(returncode=1, stderr="createrepo failed")
+        MagicMock(returncode=1, stderr="createrepo failed"),
     ]
 
     plugin = DnfPlugin()
@@ -418,7 +461,9 @@ def test_dnf_apply_empty_packages(tmp_path: Path) -> None:
 
 def test_dnf_apply_missing_bundle(tmp_path: Path) -> None:
     plugin = DnfPlugin()
-    ctx = ApplyContext(bundle_dir=tmp_path / "nonexistent", state_file=tmp_path / "state.json", task_slug="dnf")
+    ctx = ApplyContext(
+        bundle_dir=tmp_path / "nonexistent", state_file=tmp_path / "state.json", task_slug="dnf"
+    )
     res = plugin.apply({"packages": ["nginx"]}, ctx)
     assert not res.success
     assert "No bundled RPMs found" in res.message
@@ -434,6 +479,7 @@ def test_dnf_apply_createrepo_fail(mock_run_cmd, tmp_path: Path) -> None:
     ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json", task_slug="dnf")
 
     original_path = Path
+
     class MockPath(original_path):
         def __new__(cls, *args, **kwargs):
             path_str = str(args[0])
@@ -452,7 +498,7 @@ def test_dnf_apply_install_fail(mock_run_cmd, tmp_path: Path) -> None:
     # First command (createrepo_c) succeeds, second (dnf install) fails
     mock_run_cmd.side_effect = [
         MagicMock(returncode=0),
-        MagicMock(returncode=1, stderr="dnf install error")
+        MagicMock(returncode=1, stderr="dnf install error"),
     ]
 
     plugin = DnfPlugin()
@@ -461,6 +507,7 @@ def test_dnf_apply_install_fail(mock_run_cmd, tmp_path: Path) -> None:
     ctx = ApplyContext(bundle_dir=bundle_dir, state_file=tmp_path / "state.json", task_slug="dnf")
 
     original_path = Path
+
     class MockPath(original_path):
         def __new__(cls, *args, **kwargs):
             path_str = str(args[0])
@@ -472,4 +519,3 @@ def test_dnf_apply_install_fail(mock_run_cmd, tmp_path: Path) -> None:
         res = plugin.apply({"packages": ["nginx"]}, ctx)
     assert not res.success
     assert "dnf install error" in res.errors[0]
-

@@ -19,12 +19,16 @@ def plugin() -> OciImagePlugin:
 
 @pytest.fixture
 def pack_ctx(tmp_bundle_dir: Path) -> PackContext:
-    return PackContext(bundle_dir=tmp_bundle_dir, manifest_dir=tmp_bundle_dir, dry_run=False, task_slug="images")
+    return PackContext(
+        bundle_dir=tmp_bundle_dir, manifest_dir=tmp_bundle_dir, dry_run=False, task_slug="images"
+    )
 
 
 @pytest.fixture
 def apply_ctx(tmp_bundle_dir: Path, tmp_state_file: Path) -> ApplyContext:
-    return ApplyContext(bundle_dir=tmp_bundle_dir, state_file=tmp_state_file, dry_run=False, task_slug="images")
+    return ApplyContext(
+        bundle_dir=tmp_bundle_dir, state_file=tmp_state_file, dry_run=False, task_slug="images"
+    )
 
 
 SAMPLE_IMAGES = [
@@ -143,7 +147,11 @@ class TestOciApply:
         images_dir = bundle_dir / "images"
         images_dir.mkdir(parents=True)
         manifest = [
-            {"source": "docker.io/library/alpine:latest", "archive": "alpine_latest.tar", "digest": "sha256:abc"},
+            {
+                "source": "docker.io/library/alpine:latest",
+                "archive": "alpine_latest.tar",
+                "digest": "sha256:abc",
+            },
         ]
         (images_dir / "manifest.json").write_text(json.dumps(manifest))
         (images_dir / "alpine_latest.tar").write_bytes(b"fake tar")
@@ -152,7 +160,9 @@ class TestOciApply:
         self._setup_bundle(apply_ctx.bundle_dir)
         apply_ctx.dry_run = True
         with patch("syncit.plugins.oci_image._detect_runtime", return_value="docker"):
-            result = plugin.apply({"images": [{"source": "docker.io/library/alpine:latest"}]}, apply_ctx)
+            result = plugin.apply(
+                {"images": [{"source": "docker.io/library/alpine:latest"}]}, apply_ctx
+            )
         assert result.success is True
         assert "dry-run" in result.message.lower()
 
@@ -226,7 +236,10 @@ class TestOciApply:
 class TestOciDiff:
     def test_diff_new_task_marks_all_added(self, plugin: OciImagePlugin) -> None:
         result = plugin.diff(None, {"images": SAMPLE_IMAGES})
-        assert set(result.added) == {"docker.io/library/alpine:latest", "docker.io/library/postgres:16-alpine"}
+        assert set(result.added) == {
+            "docker.io/library/alpine:latest",
+            "docker.io/library/postgres:16-alpine",
+        }
         assert result.removed == []
 
     def test_diff_added_image(self, plugin: OciImagePlugin) -> None:
@@ -256,6 +269,7 @@ class TestOciDiff:
 @patch("syncit.plugins.oci_image._has_cmd")
 def test_detect_runtime_ctr(mock_has_cmd) -> None:
     from syncit.plugins.oci_image import _detect_runtime
+
     # Mock ctr to be the only command found
     mock_has_cmd.side_effect = lambda cmd: cmd == "ctr"
     assert _detect_runtime() == "ctr"
@@ -265,6 +279,7 @@ def test_detect_runtime_ctr(mock_has_cmd) -> None:
 @patch("syncit.plugins.oci_image._run")
 def test_get_digest_podman_docker(mock_run, mock_has_cmd) -> None:
     from syncit.plugins.oci_image import _get_digest
+
     # Mock skopeo False, podman True
     mock_has_cmd.side_effect = lambda cmd: cmd == "podman"
     mock_run.return_value = MagicMock(returncode=0, stdout='[{"Digest": "sha256:podmandigest"}]')
@@ -272,14 +287,18 @@ def test_get_digest_podman_docker(mock_run, mock_has_cmd) -> None:
 
     # Mock skopeo/podman False, docker True
     mock_has_cmd.side_effect = lambda cmd: cmd == "docker"
-    mock_run.return_value = MagicMock(returncode=0, stdout='[{"RepoDigests": ["alpine@sha256:dockerdigest"]}]')
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout='[{"RepoDigests": ["alpine@sha256:dockerdigest"]}]'
+    )
     assert _get_digest("alpine:latest") == "sha256:dockerdigest"
 
 
 @patch("syncit.plugins.oci_image._has_cmd", return_value=True)
 @patch("syncit.plugins.oci_image._run")
 @patch("shutil.rmtree")
-def test_pack_no_cache_wipes(mock_rmtree, mock_run, mock_has_cmd, plugin: OciImagePlugin, pack_ctx: PackContext) -> None:
+def test_pack_no_cache_wipes(
+    mock_rmtree, mock_run, mock_has_cmd, plugin: OciImagePlugin, pack_ctx: PackContext
+) -> None:
     pack_ctx.no_cache = True
     mock_run.return_value = MagicMock(returncode=0, stdout='{"Digest": "sha256:abc"}')
 
@@ -290,10 +309,14 @@ def test_pack_no_cache_wipes(mock_rmtree, mock_run, mock_has_cmd, plugin: OciIma
 
 @patch("syncit.plugins.oci_image._has_cmd")
 @patch("syncit.plugins.oci_image._run")
-def test_pack_docker_fallback(mock_run, mock_has_cmd, plugin: OciImagePlugin, pack_ctx: PackContext) -> None:
+def test_pack_docker_fallback(
+    mock_run, mock_has_cmd, plugin: OciImagePlugin, pack_ctx: PackContext
+) -> None:
     # Mock skopeo False, docker True
     mock_has_cmd.side_effect = lambda cmd: cmd == "docker"
-    mock_run.return_value = MagicMock(returncode=0, stdout='[{"RepoDigests": ["alpine@sha256:digest"]}]')
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout='[{"RepoDigests": ["alpine@sha256:digest"]}]'
+    )
 
     result = plugin.pack({"images": SAMPLE_IMAGES}, pack_ctx)
     assert result.success
@@ -306,11 +329,19 @@ def test_pack_docker_fallback(mock_run, mock_has_cmd, plugin: OciImagePlugin, pa
 @patch("syncit.plugins.oci_image._detect_runtime", return_value="ctr")
 @patch("syncit.plugins.oci_image._run")
 @patch("syncit.plugins.oci_image.OciImagePlugin._image_exists", return_value=True)
-def test_apply_ctr_runtime(mock_exists, mock_run, mock_detect, plugin: OciImagePlugin, apply_ctx: ApplyContext) -> None:
+def test_apply_ctr_runtime(
+    mock_exists, mock_run, mock_detect, plugin: OciImagePlugin, apply_ctx: ApplyContext
+) -> None:
     # Setup test bundle
     images_dir = apply_ctx.bundle_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
-    manifest = [{"source": "docker.io/library/alpine:latest", "archive": "alpine_latest.tar", "digest": "sha256:abc"}]
+    manifest = [
+        {
+            "source": "docker.io/library/alpine:latest",
+            "archive": "alpine_latest.tar",
+            "digest": "sha256:abc",
+        }
+    ]
     (images_dir / "manifest.json").write_text(json.dumps(manifest))
     (images_dir / "alpine_latest.tar").write_bytes(b"fake tar")
 
@@ -328,11 +359,19 @@ def test_apply_ctr_runtime(mock_exists, mock_run, mock_detect, plugin: OciImageP
 @patch("syncit.plugins.oci_image._detect_runtime", return_value="docker")
 @patch("syncit.plugins.oci_image._run")
 @patch("syncit.plugins.oci_image.OciImagePlugin._image_exists")
-def test_apply_load_and_tagging(mock_exists, mock_run, mock_detect, plugin: OciImagePlugin, apply_ctx: ApplyContext) -> None:
+def test_apply_load_and_tagging(
+    mock_exists, mock_run, mock_detect, plugin: OciImagePlugin, apply_ctx: ApplyContext
+) -> None:
     # Setup test bundle
     images_dir = apply_ctx.bundle_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
-    manifest = [{"source": "docker.io/library/alpine:latest", "archive": "alpine_latest.tar", "digest": "sha256:abc"}]
+    manifest = [
+        {
+            "source": "docker.io/library/alpine:latest",
+            "archive": "alpine_latest.tar",
+            "digest": "sha256:abc",
+        }
+    ]
     (images_dir / "manifest.json").write_text(json.dumps(manifest))
     (images_dir / "alpine_latest.tar").write_bytes(b"fake tar")
 
@@ -340,7 +379,7 @@ def test_apply_load_and_tagging(mock_exists, mock_run, mock_detect, plugin: OciI
     # docker load returns a different ref ID, so tag is triggered
     mock_run.side_effect = [
         MagicMock(returncode=0, stdout="Loaded image ID: sha256:differentrefid\n"),
-        MagicMock(returncode=0) # tag succeeds
+        MagicMock(returncode=0),  # tag succeeds
     ]
 
     result = plugin.apply({}, apply_ctx)
@@ -352,6 +391,8 @@ def test_apply_load_and_tagging(mock_exists, mock_run, mock_detect, plugin: OciI
 
 @patch("syncit.plugins.oci_image._run")
 def test_image_exists_internal(mock_run, plugin: OciImagePlugin) -> None:
-    mock_run.return_value = MagicMock(returncode=0, stdout="docker.io/library/alpine:latest\ndocker.io/library/redis:7-alpine\n")
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="docker.io/library/alpine:latest\ndocker.io/library/redis:7-alpine\n"
+    )
     assert plugin._image_exists("docker", "docker.io/library/alpine:latest", "")
     assert not plugin._image_exists("docker", "docker.io/library/nginx:latest", "")

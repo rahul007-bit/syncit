@@ -77,7 +77,9 @@ class TestAptPack:
     def test_pack_invokes_correct_commands(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        mock_result.stdout = (
+            "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        )
         mock_result.stderr = ""
         pack_ctx.no_cache = True
 
@@ -95,7 +97,9 @@ class TestAptPack:
     def test_pack_creates_packages_file(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        mock_result.stdout = (
+            "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        )
         mock_result.stderr = ""
 
         with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result):
@@ -106,7 +110,9 @@ class TestAptPack:
     def test_pack_creates_sources_list(self, plugin: AptPlugin, pack_ctx: PackContext) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        mock_result.stdout = (
+            "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        )
         mock_result.stderr = ""
 
         with patch("syncit.plugins.apt.subprocess.run", return_value=mock_result):
@@ -116,10 +122,14 @@ class TestAptPack:
         assert "file://" in sources
         assert "trusted=yes" in sources
 
-    def test_pack_uses_base_installroot(self, plugin: AptPlugin, pack_ctx: PackContext, tmp_path: Path) -> None:
+    def test_pack_uses_base_installroot(
+        self, plugin: AptPlugin, pack_ctx: PackContext, tmp_path: Path
+    ) -> None:
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        mock_result.stdout = (
+            "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        )
         mock_result.stderr = ""
 
         installroot = tmp_path / "root"
@@ -265,10 +275,14 @@ class TestAptRenderApplySh:
 class TestAptEdgeCases:
     @patch("syncit.plugins.apt.urllib.request.urlretrieve")
     @patch("syncit.plugins.apt.subprocess.run")
-    def test_pack_with_repos(self, mock_run, mock_urlretrieve, plugin: AptPlugin, pack_ctx: PackContext) -> None:
+    def test_pack_with_repos(
+        self, mock_run, mock_urlretrieve, plugin: AptPlugin, pack_ctx: PackContext
+    ) -> None:
         # Mock apt-get install --print-uris output
         mock_result = MagicMock(returncode=0)
-        mock_result.stdout = "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        mock_result.stdout = (
+            "'http://archive.ubuntu.com/git.deb' git_2.43.0-1_amd64.deb 100 MD5Sum:123\n"
+        )
         mock_result.stderr = ""
 
         # Whenever download is called, simulate writing downloaded file to cwd
@@ -287,20 +301,33 @@ class TestAptEdgeCases:
 
         spec = {
             "packages": ["git"],
-            "repos": [{"name": "test-repo", "url": "deb http://example.com/repo noble main", "gpg_key": "https://example.com/key.gpg"}]
+            "repos": [
+                {
+                    "name": "test-repo",
+                    "url": "deb http://example.com/repo noble main",
+                    "gpg_key": "https://example.com/key.gpg",
+                }
+            ],
         }
-        
+
         # Patch Path.read_bytes to return armor block and mock os-release
-        with patch("syncit.plugins.apt.Path.read_bytes", return_value=b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
+        with patch(
+            "syncit.plugins.apt.Path.read_bytes",
+            return_value=b"-----BEGIN PGP PUBLIC KEY BLOCK-----",
+        ):
             with patch("syncit.plugins.apt.Path.rename"):
                 res = plugin.pack(spec, pack_ctx)
-        
+
         assert res.success
         assert mock_urlretrieve.called
 
-    def test_pack_invalid_installroot(self, plugin: AptPlugin, pack_ctx: PackContext, tmp_path: Path) -> None:
+    def test_pack_invalid_installroot(
+        self, plugin: AptPlugin, pack_ctx: PackContext, tmp_path: Path
+    ) -> None:
         # 1. Nonexistent directory
-        res = plugin.pack({"packages": ["git"], "base_installroot": str(tmp_path / "nonexistent")}, pack_ctx)
+        res = plugin.pack(
+            {"packages": ["git"], "base_installroot": str(tmp_path / "nonexistent")}, pack_ctx
+        )
         assert not res.success
         assert "does not exist or is not a directory" in res.errors[0]
 
@@ -312,7 +339,9 @@ class TestAptEdgeCases:
         assert "missing status file" in res.errors[0]
 
     @patch("syncit.plugins.apt.subprocess.run")
-    def test_pack_dependency_resolution_fails(self, mock_run, plugin: AptPlugin, pack_ctx: PackContext) -> None:
+    def test_pack_dependency_resolution_fails(
+        self, mock_run, plugin: AptPlugin, pack_ctx: PackContext
+    ) -> None:
         mock_run.return_value = MagicMock(returncode=1, stderr="unable to locate package")
         res = plugin.pack({"packages": ["git"]}, pack_ctx)
         assert not res.success

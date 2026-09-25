@@ -322,9 +322,15 @@ def _populate_base_root(root_path: Path, plugin_type: str, codename: str) -> boo
             rprint(f"[red]debootstrap failed with exit code {res.returncode}[/red]")
             return False
     else:
-        if not shutil.which("dnf") and not _install_missing_tool(
-            "dnf", ["apt-get", "install", "-y", "dnf"]
-        ):
+        if not shutil.which("dnf"):
+            # dnf @core needs the host's own RPM repos + entitlement — an
+            # apt host cannot provide that, so fail with actionable advice
+            rprint(
+                "[red]dnf is not installed and this host is not RPM-based — "
+                "a dnf base root must be built on the target distro's machine "
+                "(RHEL/Rocky/Fedora/Alma). Run 'syncit create' there, or target "
+                "Ubuntu/Debian instead.[/red]"
+            )
             return False
         dnf_init_cmd = ["dnf", "install", "--installroot", str(root_path), "@core", "-y"]
         if codename:

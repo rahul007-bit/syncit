@@ -176,6 +176,56 @@ def test_version_le():
     assert rb._version_le("1.0", "1.0") is True
 
 
+# ── Host repo discovery (/etc/yum.repos.d) ───────────────────────────────
+
+
+def test_load_host_repos_parses_repo_files(tmp_path):
+    from syncit.wizard import host_repos as hr
+
+    (tmp_path / "custom.repo").write_text(
+        "[my-el9]\n"
+        "name=My Internal EL9 Mirror\n"
+        "baseurl = https://mirror.internal/el9/$releasever/$basearch/\n"
+        "enabled=1\n"
+        "gpgkey = file:///etc/pki/rpm-gpg/RPM-GPG-KEY-my\n"
+        "gpgcheck=1\n"
+        "\n"
+        "[disabled-one]\n"
+        "name=Disabled\n"
+        "baseurl=https://example.com/disabled/\n"
+        "enabled=0\n"
+    )
+    (tmp_path / "src.repo").write_text(
+        "[appstream-source]\nname=Source\nbaseurl=https://example.com/source/\nenabled=1\n"
+    )
+    entries = hr.load_host_repos(tmp_path)
+    ids = [e["id"] for e in entries]
+    assert ids == ["my-el9"]  # disabled + -source filtered
+    repo = entries[0]["repo"]
+    assert repo["name"] == "my-el9"
+    assert repo["baseurl"] == "https://mirror.internal/el9/$releasever/$basearch/"
+    assert repo["gpgkey"] == "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-my"
+    assert repo["gpgcheck"] is True
+    assert entries[0]["label"] == "[host] my-el9"
+
+
+def test_load_host_repos_missing_dir(tmp_path):
+    from syncit.wizard import host_repos as hr
+
+    assert hr.load_host_repos(tmp_path / "nope") == []
+
+
+def test_load_host_repos_skips_mirrorlist_only_with_flag(tmp_path):
+    from syncit.wizard import host_repos as hr
+
+    (tmp_path / "ml.repo").write_text(
+        "[ml-repo]\nname=ML\nmirrorlist=https://mirrors.example.com/ml\nenabled=1\n"
+    )
+    entries = hr.load_host_repos(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["repo"].get("_mirrorlist_only") is True
+
+
 # ── Base installroot population checks ───────────────────────────────────
 
 

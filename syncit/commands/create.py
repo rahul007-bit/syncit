@@ -19,6 +19,7 @@ from syncit.registry import (
 from syncit.commands.pack import run_pack
 from syncit.commands.up import run_up
 from syncit.wizard import catalog as repo_catalog
+from syncit.wizard import host_repos
 from syncit.wizard.rpm_browser import browse_dnf_packages
 
 console = Console()
@@ -319,47 +320,79 @@ def _prompt_upstream_repos(
             return repos
 
         if action.startswith("Browse"):
-            entries = repo_catalog.load_repos(distro_id)
+            catalog_entries = repo_catalog.load_repos(distro_id)
+            host_entries = host_repos.load_host_repos()
+            entries = catalog_entries + host_entries
             if not entries:
                 rprint(
-                    f"[yellow]No curated repos for '{distro_id}' yet — add a custom repo instead.[/yellow]"
+                    f"[yellow]No curated repos for '{distro_id}' and none found in /etc/yum.repos.d — add a custom repo instead.[/yellow]"
                 )
                 continue
+            if host_entries:
+                rprint(
+                    f"[dim]Found {len(host_entries)} repo(s) already configured on this host — marked [host].[/dim]"
+                )
             picked = (
                 questionary.checkbox(
                     "Select upstream repos (space to toggle, Enter to confirm):",
                     choices=[
                         questionary.Choice(
-                            title=f"{e['label']:<24} {e['description']}", value=e["id"]
+                            title=f"{e['label']:<24} {e['description']}",
+                            value=("host:" + e["id"])
+                            if e["label"].startswith("[host]")
+                            else e["id"],
                         )
                         for e in entries
                     ],
                 ).ask()
                 or []
             )
-            for entry_id in picked:
-                entry = next(e for e in entries if e["id"] == entry_id)
-                values: dict[str, str] = {}
-                for var_name, spec in (entry.get("vars") or {}).items():
-                    ans = questionary.text(
-                        spec.get("prompt", f"{var_name}:"),
-                        default=spec.get("default", ""),
-                    ).ask()
-                    values[var_name] = (ans or spec.get("default", "")).strip()
-                basearch = repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64")
-                rendered_list = repo_catalog.render_entry_repos(
-                    entry,
-                    distro_id=distro_id,
-                    releasever=releasever,
-                    basearch=basearch,
-                    values=values,
+            for picked_id in picked:
+                is_host = picked_id.startswith("host:")
+                entry = next(
+                    (
+                        e
+                        for e in entries
+                        if (e["label"].startswith("[host]") and ("host:" + e["id"]) == picked_id)
+                        or (not e["label"].startswith("[host]") and e["id"] == picked_id)
+                    ),
+                    None,
                 )
-                repos.extend(rendered_list)
-                rprint(f"[green]Repo(s) added:[/] {entry['label']} ({len(rendered_list)})")
-                for rendered in rendered_list:
-                    rprint(
-                        f"[dim]  {rendered.get('name', '')}: {rendered.get('baseurl', '')}[/dim]"
+                if entry is None:
+                    continue
+                if is_host:
+                    # Host repo config is used as-is (URLs keep dnf's native
+                    # $releasever/$basearch, resolved at pack time)
+                    repo_cfg = dict(entry["repo"])
+                    repo_cfg.pop("_mirrorlist_only", None)
+                    rendered_list = [repo_cfg]
+                    if entry["repo"].get("_mirrorlist_only"):
+                        rprint(
+                            f"[yellow]  {entry['id']}: mirrorlist URL — may not resolve via syncit's baseurl-only pack path.[/yellow]"
+                        )
+                else:
+                    values: dict[str, str] = {}
+                    for var_name, spec in (entry.get("vars") or {}).items():
+                        ans = questionary.text(
+                            spec.get("prompt", f"{var_name}:"),
+                            default=spec.get("default", ""),
+                        ).ask()
+                        values[var_name] = (ans or spec.get("default", "")).strip()
+                    basearch = repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64")
+                    rendered_list = repo_catalog.render_entry_repos(
+                        entry,
+                        distro_id=distro_id,
+                        releasever=releasever,
+                        basearch=basearch,
+                        values=values,
                     )
+                known = {r.get("name") for r in repos}
+                for rendered in rendered_list:
+                    if rendered.get("name") in known:
+                        continue
+                    repos.append(rendered)
+                    rprint(f"[green]Repo added:[/] {rendered.get('name', '')}")
+                    rprint(f"[dim]  {rendered.get('baseurl', '')}[/dim]")
         else:  # Add custom repo
             name = questionary.text("Repo name (short key):").ask()
             if not name:

@@ -13,6 +13,17 @@ from syncit.commands.create import (
     _build_catalog_entry,
     create_cmd,
 )
+from syncit.wizard import history as wiz_history
+
+
+@pytest.fixture(autouse=True)
+def isolated_history(tmp_path: Path):
+    hist_dir = tmp_path / "hist"
+    hist_dir.mkdir()
+    wiz_history.DEFAULT_PATH = hist_dir / "history.json"  # type: ignore[attr-defined]
+    wiz_history.reset_cache()
+    yield
+    wiz_history.reset_cache()
 
 
 def test_detect_codename(tmp_path: Path) -> None:
@@ -122,20 +133,20 @@ def test_create_cmd_interactive_workflow(
     # - Add from catalog? Yes
     # Simulate Rocky distro (non-APT), no base_installroot, adding postgresql from catalog, then saving and exiting.
     mock_select.side_effect = [
-        MagicMock(ask=lambda: "Rocky"),  # Select 1: Distro Choice
-        MagicMock(ask=lambda: "amd64"),  # Select 2: Arch
-        MagicMock(ask=lambda: "Search catalog"),  # Select 3: What next?
-        MagicMock(ask=lambda: "postgresql"),  # Select 4: Catalog search selection
-        MagicMock(ask=lambda: "latest"),  # Select 5: Version selection
-        MagicMock(ask=lambda: "Done"),  # Select 6: What next? (breaks loop)
-        MagicMock(ask=lambda: "none"),  # Select 7: Run choice
+        MagicMock(ask=lambda: "1.0.0"),  # Select 1: Version (type-or-pick w/ default)
+        MagicMock(ask=lambda: "Rocky"),  # Select 2: Distro Choice
+        MagicMock(ask=lambda: "amd64"),  # Select 3: Arch
+        MagicMock(ask=lambda: "9"),  # Select 4: Release version (type-or-pick)
+        MagicMock(ask=lambda: "Search catalog"),  # Select 5: What next?
+        MagicMock(ask=lambda: "postgresql"),  # Select 6: Catalog search selection
+        MagicMock(ask=lambda: "latest"),  # Select 7: Version selection
+        MagicMock(ask=lambda: "Done"),  # Select 8: What next? (breaks loop)
+        MagicMock(ask=lambda: "none"),  # Select 9: Run choice
     ]
 
     mock_text.side_effect = [
-        MagicMock(ask=lambda: "test-rocky"),  # Text 1: Bundle Name
-        MagicMock(ask=lambda: "1.0.0"),  # Text 2: Bundle Version
-        MagicMock(ask=lambda: "9"),  # Text 3: Release version
-        MagicMock(ask=lambda: str(tmp_path / "bundle.yaml")),  # Text 4: Save file path
+        MagicMock(ask=lambda: "test-rocky"),  # Text 1: Bundle Name (no history → text)
+        MagicMock(ask=lambda: str(tmp_path / "bundle.yaml")),  # Text 2: Save file path
     ]
 
     mock_confirm.side_effect = [

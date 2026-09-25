@@ -113,8 +113,10 @@ def browse_pypi_packages() -> list[str] | None:
     'name==version' strings, or None when the user presses Ctrl+C.
     """
     selected: list[str] = []
+    from syncit.wizard.history import prompt_search
+
     while True:
-        name = questionary.text("PyPI package name (blank to finish):").ask()
+        name = prompt_search("pypi", "PyPI package name (Enter to search):", finish="Finish")
         if name is None:
             return None
         if not name or not name.strip():

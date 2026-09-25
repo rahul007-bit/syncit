@@ -384,10 +384,12 @@ def browse_apt_packages(
     sort_mode = "relevance"
 
     def _search_round() -> bool:
+        from syncit.wizard.history import prompt_search
+
         while True:
-            term = questionary.text(
-                "Search packages (type name, press Enter; blank to finish):"
-            ).ask()
+            term = prompt_search(
+                "apt", "Search packages (type name, press Enter):", finish="Finish"
+            )
             if term is None:
                 return True
             if not term or not term.strip():

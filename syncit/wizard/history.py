@@ -139,6 +139,36 @@ def recent_repos(plugin: str, codename: str) -> list[str]:
     return [v for v in bucket if isinstance(v, str)]
 
 
+def record_repo_set(plugin: str, codename: str, repos: list[dict]) -> None:
+    """Remember a whole upstream-repo selection (list of repo cfg dicts) as one entry."""
+    if not repos:
+        return
+    store = _load()
+    key = f"{plugin}:{codename}" if codename else plugin
+    bucket = _bucket(store, "repos", key)
+    entry = json.dumps(repos)
+    if entry in bucket:
+        bucket.remove(entry)
+    bucket.insert(0, entry)
+    del bucket[MAX_HISTORY:]
+    _save()
+
+
+def recent_repo_sets(plugin: str, codename: str) -> list[list[dict]]:
+    """Previously used repo selections (list of repo cfg dicts), most recent first."""
+    key = f"{plugin}:{codename}" if codename else plugin
+    bucket = _bucket(_load(), "repos", key)
+    out: list[list[dict]] = []
+    for v in bucket:
+        try:
+            data = json.loads(v)
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                out.append(data)
+        except Exception:
+            continue
+    return out
+
+
 # ── History-aware prompts ────────────────────────────────────────────────
 
 
@@ -181,10 +211,13 @@ def prompt_with_history(
     return picked
 
 
-def prompt_search(browser: str, message: str, history: list[str] | None = None) -> str | None:
+def prompt_search(
+    browser: str, message: str, history: list[str] | None = None, finish: str | None = None
+) -> str | None:
     """
-    Search prompt with per-browser history: pick a previous term or enter a
-    new search. Returns the term, or None on Ctrl+C/blank-new.
+    Search prompt with per-browser history: pick a previous term, enter a new
+    search, or pick the `finish` option (returns "" — callers treat blank as
+    "done with this round"). Returns None on Ctrl+C.
     """
     recents = history if history is not None else recent_searches(browser)
     recents = [r for r in recents if r]
@@ -195,6 +228,8 @@ def prompt_search(browser: str, message: str, history: list[str] | None = None) 
         return term
     choices = [questionary.Choice(title=f"{r}  [recent]", value=r) for r in recents[:MAX_HISTORY]]
     choices.append(questionary.Choice(title="New search…", value="__new_search__"))
+    if finish:
+        choices.append(questionary.Choice(title=finish, value="__finish__"))
     picked = questionary.select(message, choices=choices, use_jk_keys=False).ask()
     if picked is None:
         return None
@@ -203,6 +238,8 @@ def prompt_search(browser: str, message: str, history: list[str] | None = None) 
         if term is not None and term.strip():
             record_search(browser, term)
         return term
+    if picked == "__finish__":
+        return ""
     return picked
 
 

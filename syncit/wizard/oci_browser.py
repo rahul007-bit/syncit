@@ -273,10 +273,14 @@ def browse_oci_images(
     sort_mode = "relevance"
 
     def _search_round() -> bool:
+        from syncit.wizard.history import prompt_search
+
         while True:
-            term = questionary.text(
-                f"Search {prompt_label} or paste a full image ref (blank to finish):"
-            ).ask()
+            term = prompt_search(
+                "docker",
+                f"Search {prompt_label} or paste a full image ref (Enter to search):",
+                finish="Finish",
+            )
             if term is None:
                 return True
             if not term or not term.strip():

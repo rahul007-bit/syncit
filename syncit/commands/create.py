@@ -373,11 +373,55 @@ def _probe_repo(repo_cfg: dict, plugin: str, releasever: str = "", arch: str = "
     )
 
 
+def _task_summary(tasks: list) -> str:
+    """One-line state: 'k8s(6 pkgs) · images(2 imgs) · pip(reqs.txt)'."""
+    if not tasks:
+        return "no tasks yet"
+    parts: list[str] = []
+    for t in tasks:
+        plugin = t.get("plugin", "?")
+        name = t.get("name", "?")
+        if plugin in ("apt", "dnf"):
+            parts.append(f"{name}({len(t.get('packages', []))} pkgs)")
+        elif plugin == "pip":
+            req = t.get("requirements")
+            parts.append(
+                f"{name}({Path(req).name})" if req else f"{name}({len(t.get('packages', []))} py)"
+            )
+        elif plugin == "oci_image":
+            parts.append(f"{name}({len(t.get('images', []))} imgs)")
+        elif plugin == "file":
+            parts.append(f"{name}({len(t.get('files', []))} files)")
+        else:
+            parts.append(name)
+    return f"{len(tasks)} tasks: " + " · ".join(parts)
+
+
+def _finalize_task(task: dict, tasks: list, base_root_path: str, plugin_type: str) -> None:
+    """Inject base_installroot, append the task, offer catalog reuse."""
+    if task.get("plugin") in ("apt", "dnf") and base_root_path:
+        task["base_installroot"] = base_root_path
+    tasks.append(task)
+    rprint(f"[green]Task added:[/] {task['name']}  [dim][{_task_summary(tasks)}][/dim]")
+    if questionary.confirm("Save to catalog for future reuse?", default=False).ask():
+        _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
+
+
 def _prompt_upstream_repos(
-    plugin: str, distro_id: str = "", releasever: str = "", arch: str = "amd64"
+    plugin: str,
+    distro_id: str = "",
+    releasever: str = "",
+    arch: str = "amd64",
+    prev_repos: list[dict] | None = None,
 ) -> list[dict]:
     """Interactive multi-repo picker: curated catalog (dnf) + custom entries."""
     repos: list[dict] = []
+    if prev_repos:
+        names = ", ".join(r.get("name", "") for r in prev_repos[:4])
+        if questionary.confirm(
+            f"Reuse the previous upstream repos ({names})?", default=False
+        ).ask():
+            return [dict(r) for r in prev_repos]
     while True:
         choices = ["Browse popular repos (curated catalog)"]
         if repos:
@@ -385,6 +429,10 @@ def _prompt_upstream_repos(
         choices += ["Add custom repo", f"Done ({len(repos)} repo(s))"]
         action = questionary.select("Upstream repos:", choices=choices).ask()
         if action is None or action.startswith("Done"):
+            if repos:
+                from syncit.wizard.history import record_repo_set
+
+                record_repo_set(plugin, releasever, repos)
             return repos
 
         if action.startswith("Remove"):
@@ -537,9 +585,14 @@ def _prompt_apt_dnf_task(
     Returns None when the user backs out of the live browser (Ctrl+C /
     "Cancel browsing") — the task is then not added at all.
     """
+    from syncit.wizard.history import recent_repo_sets
+
     task: dict = {"name": task_name, "plugin": plugin}
 
-    repos = _prompt_upstream_repos(plugin, distro_id, releasever, arch)
+    prev = recent_repo_sets(plugin, releasever)
+    repos = _prompt_upstream_repos(
+        plugin, distro_id, releasever, arch, prev_repos=prev[0] if prev else None
+    )
     if repos:
         task["repos"] = repos
 
@@ -634,8 +687,12 @@ def _prompt_apt_dnf_task(
 
 
 def _prompt_pip_task(task_name: str) -> dict | None:
+    from syncit.wizard import history as wiz_history
+
     task: dict = {"name": task_name, "plugin": "pip"}
-    req_file = questionary.text("requirements.txt path (blank to list packages inline):").ask()
+    req_file = wiz_history.prompt_with_history(
+        "requirements_path", "requirements.txt path (blank to list packages inline):"
+    )
     if req_file is None:
         return None
     if req_file:
@@ -733,8 +790,10 @@ def _create_custom_task(
     Full interactive wizard to define a single custom task from scratch.
     Returns the task dict, or None if the user cancelled.
     """
+    from syncit.wizard import history as wiz_history
+
     rprint("\n[bold]Custom Task[/bold]")
-    task_name = questionary.text("Task name:").ask()
+    task_name = wiz_history.prompt_with_history("task_name", "Task name:")
     if not task_name:
         return None
 
@@ -867,12 +926,19 @@ def create_cmd(
     meta = existing.get("metadata", {})
     targets = existing.get("spec", {}).get("targets", {})
 
-    bundle_name = questionary.text("Bundle name:", default=meta.get("name", "")).ask()
+    from syncit.wizard import history as wiz_history
+
+    bundle_name = wiz_history.prompt_with_history(
+        "bundle_name", "Bundle name:", default=meta.get("name", "")
+    )
     if not bundle_name:
         raise typer.Exit()
 
     version = _require(
-        questionary.text("Version:", default=meta.get("version", "1.0.0")).ask(), "version"
+        wiz_history.prompt_with_history(
+            "bundle_version", "Version:", default=meta.get("version", "1.0.0")
+        ),
+        "version",
     )
 
     existing_distro_raw = targets.get("distro", "")
@@ -923,7 +989,8 @@ def create_cmd(
                 rprint(h)
 
         codename = _require(
-            questionary.text("Codename:", default=default_codename).ask(), "codename"
+            wiz_history.prompt_with_history("codename", "Codename:", default=default_codename),
+            "codename",
         )
         plugin_type = "apt"
     else:
@@ -959,10 +1026,11 @@ def create_cmd(
                 rprint(h)
 
         codename = _require(
-            questionary.text(
+            wiz_history.prompt_with_history(
+                "releasever",
                 "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
                 default=default_releasever,
-            ).ask(),
+            ),
             "release version",
         )
 
@@ -982,9 +1050,14 @@ def create_cmd(
             if "base_installroot" in t:
                 existing_base = t["base_installroot"]
                 break
-        base_root_path = questionary.text(
-            "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):", default=existing_base
-        ).ask()
+        base_root_path = (
+            wiz_history.prompt_with_history(
+                "base_root",
+                "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):",
+                default=existing_base,
+            )
+            or ""
+        )
 
         if base_root_path:
             root_path = Path(base_root_path).expanduser().resolve()
@@ -1029,15 +1102,13 @@ def create_cmd(
 
     # ── Task loop ─────────────────────────────────────────────────────────
     while True:
-        rprint("\n[bold]Add a task[/bold]")
+        rprint(f"\n[bold]Add a task[/bold]  [cyan][{_task_summary(tasks)}][/cyan]")
         action = questionary.select(
             "What next?",
             choices=[
-                "Browse repos & packages",
                 "Search catalog",
-                "Create custom task",
-                "Add empty task",
-                "Reload catalog",
+                "Browse packages & images",
+                "Advanced…",
                 "Done",
             ],
         ).ask()
@@ -1046,64 +1117,108 @@ def create_cmd(
         if action is None or action == "Done":
             break
 
-        elif action == "Reload catalog":
-            rprint("[cyan]Reloading catalog...[/cyan]")
-            catalog = get_catalog()
-            rprint(
-                f"[green]Catalog reloaded[/green] — {len(catalog)} entries: {', '.join(sorted(catalog.keys()))}"
-            )
-            continue
-
-        elif action == "Browse repos & packages":
-            task_name = questionary.text("Task name:").ask()
-            if task_name:
-                task = _prompt_apt_dnf_task(
-                    task_name,
-                    plugin_type,
-                    distro_id=distro_choice.lower(),
-                    releasever=codename,
-                    arch=arch,
-                    base_root=base_root_path,
-                )
+        elif action == "Browse packages & images":
+            while True:
+                browse_action = questionary.select(
+                    "Browse:",
+                    choices=[
+                        f"{plugin_type} packages (live browser)",
+                        "PyPI packages (live browser)",
+                        "Container images (live browser)",
+                        "Back",
+                    ],
+                ).ask()
+                if browse_action is None or browse_action == "Back":
+                    break
+                task_name = wiz_history.prompt_with_history("task_name", "Task name:")
+                if not task_name:
+                    continue
+                if browse_action.startswith("PyPI"):
+                    task = _prompt_pip_task(task_name)
+                elif browse_action.startswith("Container"):
+                    task = _prompt_oci_task(task_name)
+                else:
+                    task = _prompt_apt_dnf_task(
+                        task_name,
+                        plugin_type,
+                        distro_id=distro_choice.lower(),
+                        releasever=codename,
+                        arch=arch,
+                        base_root=base_root_path,
+                    )
                 if task is None:
                     rprint("[yellow]Task cancelled — nothing added.[/yellow]")
                     continue
-                if task.get("plugin") in ("apt", "dnf") and base_root_path:
-                    task["base_installroot"] = base_root_path
-                tasks.append(task)
-                rprint(f"[green]Task added:[/] {task['name']}")
-                if questionary.confirm("Save to catalog for future reuse?", default=False).ask():
-                    _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
+                _finalize_task(task, tasks, base_root_path, plugin_type)
             continue
 
-        elif action == "Add empty task":
-            task_name = questionary.text("Task name:").ask()
-            if task_name:
-                t = {
-                    "name": task_name,
-                    "plugin": plugin_type,
-                    "packages": ["<package_name>"],
-                }
-                if plugin_type in ("apt", "dnf") and base_root_path:
-                    t["base_installroot"] = base_root_path
-                tasks.append(t)
-                rprint(f"[green]Task added:[/] {task_name}")
+        elif action == "Advanced…":
+            while True:
+                adv_action = questionary.select(
+                    "Advanced:",
+                    choices=[
+                        "Create custom task",
+                        "Add empty task",
+                        "Remove a task",
+                        "Reload catalog",
+                        "Back",
+                    ],
+                ).ask()
+                if adv_action is None or adv_action == "Back":
+                    break
 
-        elif action == "Create custom task":
-            task = _create_custom_task(
-                default_plugin=plugin_type,
-                distro_id=distro_choice.lower(),
-                releasever=codename,
-                arch=arch,
-                base_root=base_root_path,
-            )
-            if task:
-                if task.get("plugin") in ("apt", "dnf") and base_root_path:
-                    task["base_installroot"] = base_root_path
-                tasks.append(task)
-                rprint(f"[green]Task added:[/] {task['name']}")
-                if questionary.confirm("Save to catalog for future reuse?", default=False).ask():
-                    _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
+                if adv_action == "Create custom task":
+                    task = _create_custom_task(
+                        default_plugin=plugin_type,
+                        distro_id=distro_choice.lower(),
+                        releasever=codename,
+                        arch=arch,
+                        base_root=base_root_path,
+                    )
+                    if task:
+                        _finalize_task(task, tasks, base_root_path, plugin_type)
+
+                elif adv_action == "Add empty task":
+                    task_name = wiz_history.prompt_with_history("task_name", "Task name:")
+                    if task_name:
+                        t = {
+                            "name": task_name,
+                            "plugin": plugin_type,
+                            "packages": ["<package_name>"],
+                        }
+                        if plugin_type in ("apt", "dnf") and base_root_path:
+                            t["base_installroot"] = base_root_path
+                        tasks.append(t)
+                        rprint(
+                            f"[green]Task added:[/] {task_name}  [dim][{_task_summary(tasks)}][/dim]"
+                        )
+
+                elif adv_action == "Remove a task":
+                    if not tasks:
+                        rprint("[yellow]No tasks to remove.[/yellow]")
+                        continue
+                    doomed = questionary.select(
+                        "Remove which task?",
+                        choices=[
+                            questionary.Choice(title=_task_summary([t]), value=i)
+                            for i, t in enumerate(tasks)
+                        ]
+                        + [questionary.Choice(title="Back", value=-1)],
+                    ).ask()
+                    if doomed is None or doomed == -1:
+                        continue
+                    removed = tasks.pop(doomed)
+                    rprint(f"[yellow]Task removed:[/] {removed.get('name', '?')}")
+                    rprint(f"[cyan][{_task_summary(tasks)}][/cyan]")
+
+                elif adv_action == "Reload catalog":
+                    rprint("[cyan]Reloading catalog...[/cyan]")
+                    catalog = get_catalog()
+                    rprint(
+                        f"[green]Catalog reloaded[/green] — {len(catalog)} entries: {', '.join(sorted(catalog.keys()))}"
+                    )
+
+            continue
 
         else:  # Search catalog
             if not catalog:

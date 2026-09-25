@@ -435,13 +435,15 @@ def browse_dnf_packages(
 
     def _search_round() -> bool:
         """One search/select cycle; appends to `selected`. True = Ctrl+C cancel."""
+        from syncit.wizard.history import prompt_search
+
         while True:
             if not repos:
                 rprint("[yellow]Add an upstream repo first (search needs at least one).[/yellow]")
                 return False
-            term = questionary.text(
-                "Search packages (type name, press Enter; blank to finish):"
-            ).ask()
+            term = prompt_search(
+                "dnf", "Search packages (type name, press Enter):", finish="Finish"
+            )
             if term is None:
                 return True
             if not term or not term.strip():

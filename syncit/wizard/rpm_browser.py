@@ -44,6 +44,8 @@ def build_repo_opts(repos: list[dict], prefix: str = "syncit") -> list[str]:
             continue
         opts.extend(["--repofrompath", f"{name},{baseurl}", "--enablerepo", name])
         opts.extend(["--setopt", f"{name}.gpgcheck=0"])
+        # A dead/unreachable repo must not break the whole query
+        opts.extend(["--setopt", f"{name}.skip_if_unavailable=true"])
     return opts
 
 
@@ -63,6 +65,38 @@ def _run(cmd: list[str], timeout: int = 900) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 
+def _run_streaming(cmd: list[str], timeout: int = 900) -> int:
+    """Run a command streaming output live (for progress visibility)."""
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert process.stdout is not None
+    try:
+        for line in iter(process.stdout.readline, ""):
+            rprint(f"[dim]  {line.rstrip()}[/dim]")
+        return process.wait(timeout=timeout)
+    finally:
+        if process.stdout:
+            process.stdout.close()
+
+
+def warm_metadata(repos: list[dict], releasever: str, basearch: str) -> bool:
+    """
+    Download repo metadata into the wizard cache with live progress.
+    Returns True if makecache succeeded (or was already cached).
+    """
+    cmd = ["dnf", "makecache", "-y", *_base_args(releasever, basearch), *build_repo_opts(repos)]
+    rprint("[cyan]Downloading repo metadata (first run per repo set — later searches are instant)...[/cyan]")
+    try:
+        rc = _run_streaming(cmd)
+    except subprocess.TimeoutExpired:
+        rprint("[yellow]Metadata download timed out — continuing with partial cache.[/yellow]")
+        return False
+    if rc != 0:
+        rprint("[yellow]Metadata fetch had errors — some repos may be unavailable. Trying anyway.[/yellow]")
+        return False
+    rprint("[green]Repo metadata ready.[/green]")
+    return True
+
+
 def _fail(res: subprocess.CompletedProcess, context: str) -> None:
     rprint(f"[red]dnf {context} failed:[/red]")
     output = (res.stderr or res.stdout or "").strip().splitlines()
@@ -74,6 +108,7 @@ def search_packages(
     repos: list[dict], releasever: str, basearch: str, term: str, limit: int = 300
 ) -> list[tuple[str, str]]:
     """Search packages across the wizard repos. Returns [(name, summary)]."""
+    term = term.strip()
     cmd = [
         "dnf",
         "repoquery",
@@ -200,14 +235,13 @@ def browse_dnf_packages(
         )
         return []
 
-    rprint(
-        "[cyan]Note: repo metadata downloads into ~/.cache/syncit/wizard on first query (may take a minute).[/cyan]"
-    )
+    warm_metadata(repos, releasever, basearch)
+    rprint("[cyan]Type a package name prefix to search (blank to finish).[/cyan]")
     selected: list[str] = []
 
     while True:
         term = questionary.text("Search packages (name prefix, blank to finish):").ask()
-        if not term:
+        if not term or not term.strip():
             break
         matches = search_packages(repos, releasever, basearch, term)
         if not matches:

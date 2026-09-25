@@ -269,16 +269,14 @@ def browse_dnf_packages(
     selected: list[str] = []
 
     while True:
-        term = questionary.text("Search packages (name prefix, blank to finish):").ask()
+        term = questionary.text("Search packages (type name, press Enter; blank to finish):").ask()
         if not term or not term.strip():
             break
         matches = search_packages(repos, releasever, basearch, term)
         if not matches:
             rprint("[yellow]No matches. Try a shorter prefix.[/yellow]")
             continue
-        choices = [
-            questionary.Choice(title=f"{n:<38} [dim]{s[:60]}[/dim]", value=n) for n, s in matches
-        ]
+        choices = [questionary.Choice(title=f"{n:<38}  {s[:60]}", value=n) for n, s in matches]
         picked = (
             questionary.checkbox(
                 "Select packages (space to toggle, Enter to confirm):",

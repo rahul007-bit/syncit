@@ -61,6 +61,12 @@ def load_host_repos(repo_dir: Path | None = None) -> list[dict[str, Any]]:
             if gpgkey:
                 repo["gpgkey"] = gpgkey
             repo["gpgcheck"] = str(data.get("gpgcheck", fallback="1")).strip() == "1"
+            # TLS material (e.g. RHEL CDN entitlement) — carried through to
+            # browse and pack as --setopt=<repo>.ssl* options
+            for key in ("sslcacert", "sslclientcert", "sslclientkey"):
+                value = data.get(key)
+                if value:
+                    repo[key] = _first_line(value)
             if not baseurl and mirror:
                 # mirrorlist URLs cannot be used as a dnf baseurl — surface
                 # them but flag the limitation

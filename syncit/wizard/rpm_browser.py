@@ -47,7 +47,40 @@ def build_repo_opts(repos: list[dict], prefix: str = "syncit") -> list[str]:
         opts.extend(["--setopt", f"{name}.gpgcheck=0"])
         # A dead/unreachable repo must not break the whole query
         opts.extend(["--setopt", f"{name}.skip_if_unavailable=true"])
+        # TLS material (e.g. RHEL CDN entitlement certs from host repos)
+        for opt_key in ("sslcacert", "sslclientcert", "sslclientkey"):
+            value = repo.get(opt_key)
+            if value:
+                opts.extend(["--setopt", f"{name}.{opt_key}={value}"])
     return opts
+
+
+def check_repo_url(
+    baseurl: str,
+    sslcacert: str | None = None,
+    sslclientcert: str | None = None,
+    sslclientkey: str | None = None,
+    timeout: int = 25,
+) -> bool:
+    """
+    Probe a repo by fetching its repomd.xml. Returns True if reachable (2xx).
+    Uses curl (same TLS behavior as dnf); entitlement certs are passed when
+    provided so CDN repos probe correctly. GET (not HEAD) — some CDNs
+    (cdn.redhat.com) reject HEAD requests.
+    """
+    repomd = baseurl.rstrip("/") + "/repodata/repomd.xml"
+    cmd = ["curl", "-sL", "-m", str(timeout), "-o", "/dev/null", "-w", "%{http_code}"]
+    if sslcacert:
+        cmd.extend(["--cacert", sslcacert])
+    if sslclientcert and sslclientkey:
+        cmd.extend(["--cert", sslclientcert, "--key", sslclientkey])
+    cmd.append(repomd)
+    try:
+        res = _run(cmd, timeout=timeout + 10)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+    codes = [line.strip() for line in (res.stdout or "").splitlines() if line.strip()]
+    return bool(codes) and codes[-1].startswith("2")
 
 
 def _base_args(releasever: str, basearch: str, cachedir: Path = WIZARD_CACHE_DIR) -> list[str]:

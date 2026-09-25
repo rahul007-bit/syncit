@@ -127,10 +127,11 @@ class AptPlugin(OfflinePlugin):
 
             # Extract hostnames/domains from manifest repos to detect and avoid duplicate/conflicting configurations
             from urllib.parse import urlparse
+
             conflict_domains = []
             for repo in repos:
                 url = repo.get("url", "")
-                urls = re.findall(r'https?://[^\s\]\)]+', url)
+                urls = re.findall(r"https?://[^\s\]\)]+", url)
                 for u in urls:
                     try:
                         parsed = urlparse(u)
@@ -148,7 +149,9 @@ class AptPlugin(OfflinePlugin):
                 try:
                     lines = main_sources.read_text(encoding="utf-8").splitlines()
                     filtered_lines = [line for line in lines if not is_conflicting(line)]
-                    (Path(temp_sources) / "sources.list").write_text("\n".join(filtered_lines) + "\n", encoding="utf-8")
+                    (Path(temp_sources) / "sources.list").write_text(
+                        "\n".join(filtered_lines) + "\n", encoding="utf-8"
+                    )
                 except Exception:
                     shutil.copy2(str(main_sources), str(Path(temp_sources) / "sources.list"))
 
@@ -170,8 +173,13 @@ class AptPlugin(OfflinePlugin):
                         try:
                             if ctx.verbose:
                                 rprint(f"    [dim]Downloading GPG key for '{name}'...[/dim]")
-                            if not (gpg_key_url.startswith("http://") or gpg_key_url.startswith("https://")):
-                                raise ValueError(f"Invalid URL scheme (only http/https allowed): {gpg_key_url}")
+                            if not (
+                                gpg_key_url.startswith("http://")
+                                or gpg_key_url.startswith("https://")
+                            ):
+                                raise ValueError(
+                                    f"Invalid URL scheme (only http/https allowed): {gpg_key_url}"
+                                )
                             urllib.request.urlretrieve(gpg_key_url, str(key_dest))
                             # Check if ASCII-armored and dearmor if so
                             raw = key_dest.read_bytes()
@@ -211,7 +219,9 @@ class AptPlugin(OfflinePlugin):
                             content = f.read_text(encoding="utf-8")
                             if is_conflicting(content):
                                 if ctx.verbose:
-                                    rprint(f"    [dim]Skipping conflicting host repository file: {f.name}[/dim]")
+                                    rprint(
+                                        f"    [dim]Skipping conflicting host repository file: {f.name}[/dim]"
+                                    )
                                 continue
                             shutil.copy2(str(f), str(temp_sources_d / f.name))
                         except Exception:
@@ -225,17 +235,24 @@ class AptPlugin(OfflinePlugin):
             cache_dir.mkdir(parents=True, exist_ok=True)
 
             extra_opts = [
-                "-o", f"Dir::State={state_dir}",
-                "-o", f"Dir::Cache={cache_dir}",
+                "-o",
+                f"Dir::State={state_dir}",
+                "-o",
+                f"Dir::Cache={cache_dir}",
             ]
             if (Path(temp_sources) / "sources.list").exists():
-                extra_opts.extend(["-o", f"Dir::Etc::SourceList={Path(temp_sources) / 'sources.list'}"])
+                extra_opts.extend(
+                    ["-o", f"Dir::Etc::SourceList={Path(temp_sources) / 'sources.list'}"]
+                )
             extra_opts.extend(["-o", f"Dir::Etc::SourceParts={temp_sources_d}"])
 
             # apt-get update with combined sources so the cache knows about custom repos
             upd = _run(["apt-get", "update"] + extra_opts, timeout=120)
             if upd.returncode != 0:
-                print(f"[apt] WARNING: apt-get update returned non-zero code: {upd.stderr.strip()}", file=sys.stderr)
+                print(
+                    f"[apt] WARNING: apt-get update returned non-zero code: {upd.stderr.strip()}",
+                    file=sys.stderr,
+                )
 
         try:
             # ── Phase 1: Resolve dependencies for each package ──
@@ -262,7 +279,12 @@ class AptPlugin(OfflinePlugin):
                     errors.append(
                         f"[apt] base_installroot '{installroot_path}' does not exist or is not a directory."
                     )
-                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=[], errors=errors)
+                    return PluginResult(
+                        success=False,
+                        message="Invalid base_installroot",
+                        artifacts=[],
+                        errors=errors,
+                    )
 
                 status_file = installroot_path / "var" / "lib" / "dpkg" / "status"
                 if not status_file.exists():
@@ -270,15 +292,25 @@ class AptPlugin(OfflinePlugin):
                         f"[apt] base_installroot missing status file at {status_file}. "
                         "Ensure this is a valid Ubuntu/Debian root."
                     )
-                    return PluginResult(success=False, message="Invalid base_installroot", artifacts=[], errors=errors)
+                    return PluginResult(
+                        success=False,
+                        message="Invalid base_installroot",
+                        artifacts=[],
+                        errors=errors,
+                    )
 
-                install_cmd.extend([
-                    "-o", f"Dir::State::status={status_file}",
-                    # Disable binary caches so APT is forced to read the custom status file fresh
-                    # otherwise it will use the host's installed state and skip required dependencies
-                    "-o", "Dir::Cache::pkgcache=",
-                    "-o", "Dir::Cache::srcpkgcache="
-                ])
+                install_cmd.extend(
+                    [
+                        "-o",
+                        f"Dir::State::status={status_file}",
+                        # Disable binary caches so APT is forced to read the custom status file fresh
+                        # otherwise it will use the host's installed state and skip required dependencies
+                        "-o",
+                        "Dir::Cache::pkgcache=",
+                        "-o",
+                        "Dir::Cache::srcpkgcache=",
+                    ]
+                )
                 if ctx.verbose:
                     rprint(f"[apt] Resolving deps against installroot: {installroot_path}")
             else:
@@ -292,8 +324,15 @@ class AptPlugin(OfflinePlugin):
 
             res = _run(install_cmd)
             if res.returncode != 0:
-                errors.append(f"[apt] apt-get install failed to resolve packages: {res.stderr.strip()}")
-                return PluginResult(success=False, message="Dependency resolution failed", artifacts=[], errors=errors)
+                errors.append(
+                    f"[apt] apt-get install failed to resolve packages: {res.stderr.strip()}"
+                )
+                return PluginResult(
+                    success=False,
+                    message="Dependency resolution failed",
+                    artifacts=[],
+                    errors=errors,
+                )
 
             # Output lines look like:
             # 'http://archive.ubuntu.com/.../podman_4.9.3_amd64.deb' podman_4.9.3_amd64.deb 13408626 MD5Sum:...
@@ -321,7 +360,7 @@ class AptPlugin(OfflinePlugin):
             # (In case they were skipped by apt because they were present in the status file)
             explicit_names = {p.split("=")[0].split("/")[0].split(":")[0]: p for p in packages}
             resolved_names = {t.split("=")[0] for t in download_targets}
-            
+
             for name, full_p in explicit_names.items():
                 if name not in resolved_names:
                     download_targets.add(full_p)
@@ -341,7 +380,7 @@ class AptPlugin(OfflinePlugin):
 
                 p_name = p.split("=")[0]
                 version = p.split("=")[1] if "=" in p else None
-                
+
                 if version:
                     enc_version = version.replace(":", "%3a")
                     cand = list(cache_dir.glob(f"{p_name}_{enc_version}_*.deb"))
@@ -358,21 +397,25 @@ class AptPlugin(OfflinePlugin):
                 if ctx.verbose:
                     action = "Forced re-download" if ctx.no_cache else "Downloading"
                     rprint(f"    [dim]{action}: {p}...[/dim]")
-                
+
                 with tempfile.TemporaryDirectory() as td:
                     dl_res = _run(["apt-get", "download", p] + extra_opts, cwd=td)
                     if dl_res.returncode != 0:
-                        errors.append(f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}")
+                        errors.append(
+                            f"[apt] apt-get download failed for '{p}': {dl_res.stderr.strip()}"
+                        )
                         continue
-                        
+
                     downloaded_files = list(Path(td).glob("*.deb"))
                     if not downloaded_files:
-                        errors.append(f"[apt] apt-get download succeeded but no .deb found for '{p}'")
+                        errors.append(
+                            f"[apt] apt-get download succeeded but no .deb found for '{p}'"
+                        )
                         continue
-                        
+
                     dl_file = downloaded_files[0]
                     cache_target = cache_dir / dl_file.name
-                    
+
                     # Store in cache and copy to bundle
                     shutil.copy2(str(dl_file), str(cache_target))
                     shutil.copy2(str(dl_file), str(deb_dir / dl_file.name))
@@ -486,7 +529,9 @@ class AptPlugin(OfflinePlugin):
 
         # 3. Write sources.list.d entry
         sources_dir = Path("/etc/apt/sources.list.d")
-        write_privileged_file(sources_dir / f"offline-{slug}.list", f"deb [trusted=yes] file://{target_dir} ./\n")
+        write_privileged_file(
+            sources_dir / f"offline-{slug}.list", f"deb [trusted=yes] file://{target_dir} ./\n"
+        )
 
         # 4. Update apt cache
         upd = run_privileged(["apt-get", "update"], capture_output=True)

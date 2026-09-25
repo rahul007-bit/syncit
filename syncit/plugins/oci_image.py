@@ -77,23 +77,24 @@ def _get_digest(source: str) -> str:
 def _normalize_ref(ref: str) -> str:
     """Normalize docker image reference to include registry and tag."""
     parts = ref.split("/")
-    
+
     has_registry = False
     if len(parts) > 1:
         if "." in parts[0] or parts[0] == "localhost" or ":" in parts[0]:
             has_registry = True
-            
+
     if not has_registry:
         if len(parts) == 1:
             ref = f"docker.io/library/{ref}"
         else:
             ref = f"docker.io/{ref}"
-            
+
     last_part = ref.split("/")[-1]
     if ":" not in last_part:
         ref = f"{ref}:latest"
-        
+
     return ref
+
 
 class OciImagePlugin(OfflinePlugin):
     name = "oci_image"
@@ -104,7 +105,7 @@ class OciImagePlugin(OfflinePlugin):
         if not images or not isinstance(images, list):
             errors.append("[oci_image] 'images' must be a non-empty list")
             return errors
-        
+
         normalized_images = []
         for i, img in enumerate(images):
             if isinstance(img, str):
@@ -113,7 +114,9 @@ class OciImagePlugin(OfflinePlugin):
                 img["source"] = _normalize_ref(img["source"])
                 normalized_images.append(img)
             else:
-                errors.append(f"[oci_image] Image at index {i} must be a string or a dict with a 'source' key")
+                errors.append(
+                    f"[oci_image] Image at index {i} must be a string or a dict with a 'source' key"
+                )
 
         if not errors:
             task_spec["images"] = normalized_images
@@ -144,7 +147,9 @@ class OciImagePlugin(OfflinePlugin):
                 success=False,
                 message="[oci_image] No packing tool found",
                 artifacts=[],
-                errors=["Install docker, podman, or skopeo on the online VM before packing OCI images"],
+                errors=[
+                    "Install docker, podman, or skopeo on the online VM before packing OCI images"
+                ],
             )
 
         image_dir.mkdir(parents=True, exist_ok=True)
@@ -172,7 +177,9 @@ class OciImagePlugin(OfflinePlugin):
 
             # 1. Pull and bundle
             # Prefer skopeo, then podman, then docker based on archive format quality
-            pack_tool = "skopeo" if _has_cmd("skopeo") else "podman" if _has_cmd("podman") else "docker"
+            pack_tool = (
+                "skopeo" if _has_cmd("skopeo") else "podman" if _has_cmd("podman") else "docker"
+            )
 
             if pack_tool == "skopeo":
                 if not cache_path.exists():
@@ -182,19 +189,28 @@ class OciImagePlugin(OfflinePlugin):
                     pull_cmd = ["skopeo", "copy", f"docker://{source}", f"oci:{cache_path}"]
                     pull_res = _run(pull_cmd)
                     if pull_res.returncode != 0:
-                        errors.append(f"[oci_image] Failed to pull {source}: {pull_res.stderr.strip()}")
+                        errors.append(
+                            f"[oci_image] Failed to pull {source}: {pull_res.stderr.strip()}"
+                        )
                         shutil.rmtree(cache_path, ignore_errors=True)
                         continue
 
                 if ctx.verbose:
                     print(f"[oci_image] Bundling {source} from cache layout...")
-                # We use docker-archive format because oci-archive natively drops tags 
+                # We use docker-archive format because oci-archive natively drops tags
                 # when loaded manually with podman/docker load. docker-archive preserves them.
                 archive.unlink(missing_ok=True)
-                bundle_cmd = ["skopeo", "copy", f"oci:{cache_path}", f"docker-archive:{archive}:{source}"]
+                bundle_cmd = [
+                    "skopeo",
+                    "copy",
+                    f"oci:{cache_path}",
+                    f"docker-archive:{archive}:{source}",
+                ]
                 bundle_res = _run(bundle_cmd)
                 if bundle_res.returncode != 0:
-                    errors.append(f"[oci_image] Failed to bundle {source}: {bundle_res.stderr.strip()}")
+                    errors.append(
+                        f"[oci_image] Failed to bundle {source}: {bundle_res.stderr.strip()}"
+                    )
                     continue
             else:
                 # Fallback to docker or podman
@@ -204,19 +220,28 @@ class OciImagePlugin(OfflinePlugin):
                 if pull_res.returncode != 0:
                     errors.append(f"[oci_image] Failed to pull {source}: {pull_res.stderr.strip()}")
                     continue
-                
+
                 if ctx.verbose:
                     print(f"[oci_image] Bundling {source} via {pack_tool} save...")
                 # Both podman and docker use docker-archive format which preserves tags
                 if pack_tool == "podman":
-                    bundle_cmd = [pack_tool, "save", "--format=docker-archive", "-o", str(archive), source]
+                    bundle_cmd = [
+                        pack_tool,
+                        "save",
+                        "--format=docker-archive",
+                        "-o",
+                        str(archive),
+                        source,
+                    ]
                 else:
                     bundle_cmd = [pack_tool, "save", "-o", str(archive), source]
-                    
+
                 archive.unlink(missing_ok=True)
                 bundle_res = _run(bundle_cmd)
                 if bundle_res.returncode != 0:
-                    errors.append(f"[oci_image] Failed to bundle {source}: {bundle_res.stderr.strip()}")
+                    errors.append(
+                        f"[oci_image] Failed to bundle {source}: {bundle_res.stderr.strip()}"
+                    )
                     continue
 
             digest = _get_digest(source)
@@ -296,7 +321,8 @@ class OciImagePlugin(OfflinePlugin):
             if _has_cmd("skopeo") and runtime in ("docker", "podman"):
                 storage_driver = "containers-storage" if runtime == "podman" else "docker-daemon"
                 cmd = [
-                    "skopeo", "copy",
+                    "skopeo",
+                    "copy",
                     f"docker-archive:{archive}",
                     f"{storage_driver}:{source}",
                 ]
@@ -385,7 +411,6 @@ class OciImagePlugin(OfflinePlugin):
 
         return None
 
-
     def _image_exists(self, runtime: str, source: str, digest: str) -> bool:
         """Check if an image is already present in the local runtime."""
         try:
@@ -443,14 +468,14 @@ class OciImagePlugin(OfflinePlugin):
             safe = _safe_name(source)
             tar = f"$BUNDLE_DIR/{bundle_subdir}/{safe}.tar"
             load_lines.append(
-                f'  if command -v skopeo &>/dev/null; then\n'
+                f"  if command -v skopeo &>/dev/null; then\n"
                 f'    echo "  [oci_image] → skopeo copy {source}"\n'
                 f'    skopeo copy "docker-archive:{tar}" "$STORAGE_PREFIX:{source}"\n'
-                f'  else\n'
+                f"  else\n"
                 f'    echo "  [oci_image] → $RUNTIME load {source}"\n'
                 f'    LOADED=$($RUNTIME load -i "{tar}" 2>&1 | grep -oP "(?<=Loaded image: ).*" | head -1 || true)\n'
                 f'    [ -n "$LOADED" ] && [ "$LOADED" != "{source}" ] && $RUNTIME tag "$LOADED" "{source}" || true\n'
-                f'  fi'
+                f"  fi"
             )
 
         per_image_block = "\n".join(load_lines)

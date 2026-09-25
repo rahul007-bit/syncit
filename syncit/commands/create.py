@@ -1,4 +1,6 @@
 import json
+import re
+import shutil
 import sys
 import typer
 import yaml
@@ -16,16 +18,19 @@ from syncit.registry import (
 )
 from syncit.commands.pack import run_pack
 from syncit.commands.up import run_up
+from syncit.wizard import catalog as repo_catalog
+from syncit.wizard.rpm_browser import browse_dnf_packages
 
 console = Console()
 
-DISTRO_CHOICES = ["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux", "Amazon Linux"]
+DISTRO_CHOICES = ["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux", "Fedora", "Amazon Linux"]
 APT_DISTROS = {"Ubuntu", "Debian"}
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _detect_codename() -> str:
     """Read the local OS codename from /etc/os-release, or return ''."""
@@ -42,12 +47,19 @@ def _detect_codename() -> str:
 def _detect_releasever() -> str:
     """Read the exact OS release version used natively by DNF, fallback to VERSION_ID."""
     import subprocess
+
     try:
         # Use the system Python to break out of any virtualenv and query the native DNF config.
         # This handles complex cases like Amazon Linux 2023 (e.g. 2023.11.20260526)
         res = subprocess.run(
-            ["/usr/bin/python3", "-c", "import dnf; base=dnf.Base(); base.read_all_repos(); print(base.conf.releasever)"],
-            capture_output=True, text=True, timeout=5
+            [
+                "/usr/bin/python3",
+                "-c",
+                "import dnf; base=dnf.Base(); base.read_all_repos(); print(base.conf.releasever)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout.strip()
@@ -76,19 +88,20 @@ def _detect_distro() -> str:
                     id_val = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
                 elif line.startswith("ID_LIKE="):
                     id_like_val = line.split("=", 1)[1].strip().strip('"').strip("'").lower()
-        
+
         mapping = {
             "ubuntu": "Ubuntu",
             "debian": "Debian",
             "rhel": "RHEL",
             "rocky": "Rocky",
             "almalinux": "AlmaLinux",
+            "fedora": "Fedora",
             "amzn": "Amazon Linux",
             "amazon linux": "Amazon Linux",
         }
         if id_val in mapping:
             return mapping[id_val]
-            
+
         for token in id_like_val.split():
             if token in mapping:
                 return mapping[token]
@@ -114,7 +127,8 @@ def _dump_manifest(manifest: dict, path: Path) -> None:
 
     with open(path, "w") as f:
         yaml.dump(
-            manifest, f,
+            manifest,
+            f,
             Dumper=_NoFoldDumper,
             sort_keys=False,
             allow_unicode=True,
@@ -122,9 +136,38 @@ def _dump_manifest(manifest: dict, path: Path) -> None:
         )
 
 
+def _materialize_pip_requirements(manifest: dict, save_file: Path) -> None:
+    """
+    Turn inline pip 'packages' lists into a generated requirements.txt next to
+    the manifest. PipPlugin.pack() only reads a requirements file, so raw
+    'packages:' entries would otherwise be silently ignored at pack time.
+    """
+    for t in manifest.get("spec", {}).get("tasks", []):
+        if t.get("plugin") != "pip" or not t.get("packages"):
+            continue
+        slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(t.get("name", "pip"))) or "pip"
+        req_name = f"{slug}-requirements.txt"
+        req_path = save_file.parent / req_name
+        content = "\n".join(str(p) for p in t["packages"]) + "\n"
+        if req_path.exists() and req_path.read_text() != content:
+            if not questionary.confirm(
+                f"{req_name} already exists — overwrite?", default=True
+            ).ask():
+                rprint(f"[yellow]Keeping existing {req_name}[/yellow]")
+        else:
+            req_path.write_text(content)
+            rprint(
+                f"[green]Generated[/] {req_path} [dim](pip inline packages → requirements)[/dim]"
+            )
+        t["requirements"] = req_name
+        t.pop("packages", None)
+        t.pop("_inline_packages", None)
+
+
 def _print_catalog_table(catalog: dict) -> None:
     """Print a compact table of all catalog entries so the user can see what's available."""
     from rich.table import Table
+
     table = Table(box=None, padding=(0, 2), show_header=True, header_style="bold dim")
     table.add_column("Package", style="cyan", no_wrap=True)
     table.add_column("Category", style="dim", no_wrap=True)
@@ -161,8 +204,6 @@ def _catalog_search_prompt(catalog: dict) -> str | None:
         use_jk_keys=False,
         use_indicator=True,
     ).ask()
-
-
 
 
 def _add_subtasks(
@@ -218,44 +259,220 @@ def _add_subtasks(
 
 
 # ---------------------------------------------------------------------------
+# Base installroot helpers
+# ---------------------------------------------------------------------------
+
+
+def _dnf_root_populated(root_path: Path) -> bool:
+    """A usable dnf installroot has a populated rpmdb (never ship an empty one)."""
+    rpmdb = root_path / "var" / "lib" / "rpm"
+    return rpmdb.is_dir() and any(rpmdb.iterdir())
+
+
+def _apt_root_populated(root_path: Path) -> bool:
+    """A usable dpkg installroot has a non-empty /var/lib/dpkg/status."""
+    status = root_path / "var" / "lib" / "dpkg" / "status"
+    return status.is_file() and status.stat().st_size > 0
+
+
+def _populate_base_root(root_path: Path, plugin_type: str, codename: str) -> bool:
+    """Create a minimal OS base inside root_path (dnf @core / debootstrap). Returns True on success."""
+    from syncit.plugins.base import run_privileged
+
+    rprint(f"[cyan]Creating minimal OS base at {root_path}...[/cyan]")
+    if plugin_type == "apt":
+        cn = codename or "noble"
+        rprint(f"[dim]Running: debootstrap {cn} {root_path}[/dim]")
+        res = run_privileged(["debootstrap", cn, str(root_path)])
+        if res.returncode != 0:
+            rprint(f"[red]debootstrap failed (is it installed?):[/] {res.stderr}")
+            return False
+    else:
+        dnf_init_cmd = ["dnf", "install", "--installroot", str(root_path), "@core", "-y"]
+        if codename:
+            dnf_init_cmd.extend(["--releasever", codename])
+        rprint(f"[dim]Running: {' '.join(dnf_init_cmd)}[/dim]")
+        res = run_privileged(dnf_init_cmd)
+        if res.returncode != 0:
+            rprint(f"[red]dnf install failed:[/] {res.stderr}")
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Custom task wizard
 # ---------------------------------------------------------------------------
 
-def _prompt_apt_dnf_task(task_name: str, plugin: str) -> dict:
-    """Prompt for apt/dnf task fields (repos + packages)."""
+
+def _prompt_upstream_repos(
+    plugin: str, distro_id: str = "", releasever: str = "", arch: str = "amd64"
+) -> list[dict]:
+    """Interactive multi-repo picker: curated catalog (dnf) + custom entries."""
+    repos: list[dict] = []
+    while True:
+        choices = []
+        if plugin == "dnf":
+            choices.append("Browse popular repos (curated catalog)")
+        choices += ["Add custom repo", f"Done ({len(repos)} repo(s))"]
+        action = questionary.select("Upstream repos:", choices=choices).ask()
+        if action is None or action.startswith("Done"):
+            return repos
+
+        if action.startswith("Browse"):
+            entries = repo_catalog.load_repos(distro_id)
+            if not entries:
+                rprint(
+                    f"[yellow]No curated repos for '{distro_id}' yet — add a custom repo instead.[/yellow]"
+                )
+                continue
+            picked = (
+                questionary.checkbox(
+                    "Select upstream repos (space to toggle, Enter to confirm):",
+                    choices=[
+                        questionary.Choice(
+                            title=f"{e['label']:<24} {e['description']}", value=e["id"]
+                        )
+                        for e in entries
+                    ],
+                ).ask()
+                or []
+            )
+            for entry_id in picked:
+                entry = next(e for e in entries if e["id"] == entry_id)
+                values: dict[str, str] = {}
+                for var_name, spec in (entry.get("vars") or {}).items():
+                    ans = questionary.text(
+                        spec.get("prompt", f"{var_name}:"),
+                        default=spec.get("default", ""),
+                    ).ask()
+                    values[var_name] = (ans or spec.get("default", "")).strip()
+                basearch = repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64")
+                rendered = repo_catalog.render_repo(
+                    entry,
+                    distro_id=distro_id,
+                    releasever=releasever,
+                    basearch=basearch,
+                    values=values,
+                )
+                repos.append({"name": entry["id"], **rendered})
+                rprint(f"[green]Repo added:[/] {entry['label']}")
+                rprint(f"[dim]  {rendered.get('baseurl', '')}[/dim]")
+        else:  # Add custom repo
+            name = questionary.text("Repo name (short key):").ask()
+            if not name:
+                continue
+            if plugin == "apt":
+                url = (
+                    questionary.text("Full apt source line  (e.g. deb [...] https://... /):").ask()
+                    or ""
+                )
+                if not url:
+                    continue
+                repo: dict = {"name": name, "url": url}
+                gpg_key = questionary.text("GPG key URL (blank to skip):").ask() or ""
+                if gpg_key:
+                    repo["gpg_key"] = gpg_key
+            else:
+                url = (
+                    questionary.text("Repo base URL (supports $releasever/$basearch):").ask() or ""
+                )
+                if not url:
+                    continue
+                repo = {"name": name, "baseurl": url}
+                gpgkey = questionary.text("GPG key URL (blank to skip):").ask() or ""
+                if gpgkey:
+                    repo["gpgkey"] = gpgkey
+            repos.append(repo)
+
+
+def _prompt_apt_dnf_task(
+    task_name: str,
+    plugin: str,
+    distro_id: str = "",
+    releasever: str = "",
+    arch: str = "amd64",
+    base_root: str = "",
+) -> dict:
+    """Prompt for apt/dnf task fields (repos via catalog picker + packages)."""
     task: dict = {"name": task_name, "plugin": plugin}
 
-    if questionary.confirm("Add a custom upstream repo?", default=False).ask():
-        repo_name = questionary.text("Repo name (short key):").ask() or "custom"
-        if plugin == "apt":
-            repo_url = questionary.text(
-                "Full apt source line  (e.g. deb [...] https://... /):"
-            ).ask() or ""
-        else:
-            repo_url = questionary.text("Repo base URL:").ask() or ""
+    repos = _prompt_upstream_repos(plugin, distro_id, releasever, arch)
+    if repos:
+        task["repos"] = repos
 
-        gpg_key = questionary.text("GPG key URL (blank to skip):").ask() or ""
-        repo: dict = {"name": repo_name, "url": repo_url}
-        if gpg_key:
-            repo["gpg_key"] = gpg_key
-        task["repos"] = [repo]
+    if plugin == "dnf" and releasever:
+        task["releasever"] = releasever
 
-    pkg_str = questionary.text("Packages (comma-separated):").ask() or ""
-    task["packages"] = [p.strip() for p in pkg_str.split(",") if p.strip()]
+    packages: list[str] = []
+    if plugin == "dnf":
+        live_ok = bool(repos) and shutil.which("dnf") is not None
+        if (
+            live_ok
+            and questionary.confirm(
+                "Browse & select packages live via dnf? (No = enter manually)", default=True
+            ).ask()
+        ):
+            installroot = (
+                base_root if (base_root and _dnf_root_populated(Path(base_root))) else None
+            )
+            if base_root and not installroot:
+                rprint(
+                    "[dim]base_installroot not populated — resolving deps against build host instead.[/dim]"
+                )
+            packages = browse_dnf_packages(
+                repos,
+                releasever,
+                repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64"),
+                installroot=installroot or None,
+            )
+        elif (
+            not live_ok
+            and questionary.select(
+                "How to add packages?",
+                choices=["Enter manually", "Cancel"],
+                default="Enter manually",
+            ).ask()
+            != "Enter manually"
+        ):
+            packages = []
+    if not packages:
+        pkg_str = (
+            questionary.text(
+                "Packages (comma-separated; name-version[-release] for exact pin):"
+            ).ask()
+            or ""
+        )
+        packages = [p.strip() for p in pkg_str.split(",") if p.strip()]
+    task["packages"] = packages
     return task
 
 
 def _prompt_pip_task(task_name: str) -> dict:
     task: dict = {"name": task_name, "plugin": "pip"}
-    req_file = questionary.text(
-        "requirements.txt path (blank to list packages inline):"
-    ).ask()
+    req_file = questionary.text("requirements.txt path (blank to list packages inline):").ask()
     if req_file:
         task["requirements"] = req_file
     else:
-        pkg_str = questionary.text("Python packages (comma-separated):").ask() or ""
-        task["packages"] = [p.strip() for p in pkg_str.split(",") if p.strip()]
-    task["python_version"] = questionary.text("Python version:", default="3.11").ask()
+        # Inline packages are materialized into a generated requirements.txt
+        # next to the manifest at save time — PipPlugin.pack() only reads a
+        # requirements file, so raw 'packages:' would be silently ignored.
+        task["_inline_packages"] = True
+        packages: list[str] = []
+        if (
+            sys.stdout.isatty()
+            and questionary.confirm(
+                "Browse PyPI live (search package, pick version, preview deps)?",
+                default=True,
+            ).ask()
+        ):
+            from syncit.wizard.pypi_browser import browse_pypi_packages
+
+            packages = browse_pypi_packages()
+        if not packages:
+            pkg_str = questionary.text("Python packages (comma-separated):").ask() or ""
+            packages = [p.strip() for p in pkg_str.split(",") if p.strip()]
+        task["packages"] = packages
+    task["python_version"] = questionary.text("Python version:", default="3.11").ask() or "3.11"
     return task
 
 
@@ -294,7 +511,13 @@ def _prompt_file_task(task_name: str) -> dict:
     return task
 
 
-def _create_custom_task(default_plugin: str) -> dict | None:
+def _create_custom_task(
+    default_plugin: str,
+    distro_id: str = "",
+    releasever: str = "",
+    arch: str = "amd64",
+    base_root: str = "",
+) -> dict | None:
     """
     Full interactive wizard to define a single custom task from scratch.
     Returns the task dict, or None if the user cancelled.
@@ -311,7 +534,14 @@ def _create_custom_task(default_plugin: str) -> dict | None:
     ).ask()
 
     if plugin in ("apt", "dnf"):
-        return _prompt_apt_dnf_task(task_name, plugin)
+        return _prompt_apt_dnf_task(
+            task_name,
+            plugin,
+            distro_id=distro_id,
+            releasever=releasever,
+            arch=arch,
+            base_root=base_root,
+        )
     elif plugin == "pip":
         return _prompt_pip_task(task_name)
     elif plugin == "oci_image":
@@ -359,9 +589,12 @@ def _save_custom_task_to_catalog(task: dict, plugin: str) -> None:
         choices=["infrastructure", "runtime", "database", "custom"],
         default="custom",
     ).ask()
-    versions_str = questionary.text(
-        "Supported versions (comma-separated, or 'latest'):", default="latest"
-    ).ask() or "latest"
+    versions_str = (
+        questionary.text(
+            "Supported versions (comma-separated, or 'latest'):", default="latest"
+        ).ask()
+        or "latest"
+    )
     versions = [v.strip() for v in versions_str.split(",") if v.strip()]
 
     entry = _build_catalog_entry(task, plugin)
@@ -372,12 +605,8 @@ def _save_custom_task_to_catalog(task: dict, plugin: str) -> None:
     location = questionary.select(
         "Save location:",
         choices=[
-            questionary.Choice(
-                "User catalog  (~/.config/syncit/catalog.json)", "user"
-            ),
-            questionary.Choice(
-                "Project catalog  (./syncit-catalog.json)", "project"
-            ),
+            questionary.Choice("User catalog  (~/.config/syncit/catalog.json)", "user"),
+            questionary.Choice("Project catalog  (./syncit-catalog.json)", "project"),
         ],
     ).ask()
 
@@ -393,6 +622,7 @@ def _save_custom_task_to_catalog(task: dict, plugin: str) -> None:
 # ---------------------------------------------------------------------------
 # Command
 # ---------------------------------------------------------------------------
+
 
 def create_cmd(
     manifest_file: Optional[Path] = typer.Argument(
@@ -426,9 +656,7 @@ def create_cmd(
     meta = existing.get("metadata", {})
     targets = existing.get("spec", {}).get("targets", {})
 
-    bundle_name = questionary.text(
-        "Bundle name:", default=meta.get("name", "")
-    ).ask()
+    bundle_name = questionary.text("Bundle name:", default=meta.get("name", "")).ask()
     if not bundle_name:
         raise typer.Exit()
 
@@ -472,9 +700,7 @@ def create_cmd(
                 f"  [cyan]{detected}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
             )
         if existing_codename and existing_codename != detected:
-            hints.append(
-                f"  [cyan]{existing_codename}[/cyan]  [dim](current in file)[/dim]"
-            )
+            hints.append(f"  [cyan]{existing_codename}[/cyan]  [dim](current in file)[/dim]")
         if hints:
             rprint("[dim]Codename hints:[/dim]")
             for h in hints:
@@ -498,21 +724,19 @@ def create_cmd(
         detected_releasever = _detect_releasever()
         existing_releasever = targets.get("codename", "")
         default_releasever = existing_releasever or detected_releasever or "9"
-        
+
         hints: list[str] = []
         if detected_releasever:
             hints.append(
                 f"  [cyan]{detected_releasever}[/cyan]  [dim](recommended — detected on this machine)[/dim]"
             )
         if existing_releasever and existing_releasever != detected_releasever:
-            hints.append(
-                f"  [cyan]{existing_releasever}[/cyan]  [dim](current in file)[/dim]"
-            )
+            hints.append(f"  [cyan]{existing_releasever}[/cyan]  [dim](current in file)[/dim]")
         if hints:
             rprint("[dim]Release version hints:[/dim]")
             for h in hints:
                 rprint(h)
-                
+
         codename = questionary.text(
             "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
             default=default_releasever,
@@ -524,7 +748,7 @@ def create_cmd(
         "Enable base_installroot for accurate dependency resolution? (apt/dnf tasks)",
         default=has_base,
     ).ask()
-    
+
     base_root_path = ""
     if enable_base:
         existing_base = "/"
@@ -533,55 +757,38 @@ def create_cmd(
                 existing_base = t["base_installroot"]
                 break
         base_root_path = questionary.text(
-            "Base installroot path (e.g. / or /var/lib/minimal-root):",
-            default=existing_base
+            "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):", default=existing_base
         ).ask()
-        
+
         if base_root_path:
             root_path = Path(base_root_path).expanduser().resolve()
-            if not root_path.is_dir():
-                choice = questionary.select(
-                    f"Directory '{root_path}' does not exist. How would you like to initialize it? (requires sudo)",
-                    choices=[
-                        questionary.Choice("Empty Directory (Downloads ALL dependencies - Safer, Larger bundle)", "empty"),
-                        questionary.Choice(f"Minimal OS Base (Uses {'debootstrap' if plugin_type == 'apt' else 'dnf @core'} - Optimized, Slower)", "baseos"),
-                        questionary.Choice("Do not create", "none")
-                    ]
-                ).ask()
-
-                if choice in ("empty", "baseos"):
-                    from syncit.plugins.base import run_privileged
-                    rprint(f"[cyan]Creating base_installroot at {root_path}...[/cyan]")
-                    if plugin_type == "apt":
-                        if choice == "empty":
-                            run_privileged(["mkdir", "-p", f"{root_path}/var/lib/dpkg"])
-                            run_privileged(["touch", f"{root_path}/var/lib/dpkg/status"])
-                        else:
-                            cn = codename or "noble"
-                            rprint(f"[dim]Running: debootstrap {cn} {root_path}[/dim]")
-                            res = run_privileged(["debootstrap", cn, str(root_path)])
-                            if res.returncode != 0:
-                                rprint(f"[red]debootstrap failed (is it installed?):[/] {res.stderr}")
-                                raise typer.Exit(1)
-                    else:
-                        if choice == "empty":
-                            run_privileged(["mkdir", "-p", str(root_path)])
-                        else:
-                            dnf_init_cmd = ["dnf", "install", "--installroot", str(root_path), "@core", "-y"]
-                            if codename:
-                                dnf_init_cmd.extend(["--releasever", codename])
-                            
-                            rprint(f"[dim]Running: {' '.join(dnf_init_cmd)}[/dim]")
-                            res = run_privileged(dnf_init_cmd)
-                            if res.returncode != 0:
-                                rprint(f"[red]dnf install failed:[/] {res.stderr}")
-                                raise typer.Exit(1)
-                    rprint(f"[green]Successfully initialized {root_path}[/green]")
+            populated = (
+                _dnf_root_populated(root_path)
+                if plugin_type == "dnf"
+                else _apt_root_populated(root_path)
+            )
+            # An empty/unusable installroot produces wrong dependency resolution
+            # — always require a populated minimal OS base (dnf @core / debootstrap).
+            if not populated:
+                tool = "dnf @core" if plugin_type == "dnf" else "debootstrap"
+                if questionary.confirm(
+                    f"Base root '{root_path}' is empty or not populated. Populate it now with a minimal OS base ({tool})? (requires sudo)",
+                    default=True,
+                ).ask():
+                    ok = _populate_base_root(root_path, plugin_type, codename)
+                    if not ok:
+                        raise typer.Exit(1)
+                    rprint(f"[green]Successfully populated {root_path}[/green]")
+                else:
+                    rprint(
+                        "[yellow]Continuing without a populated base root — "
+                        "dependency resolution will be less accurate.[/yellow]"
+                    )
 
     # Carry forward existing tasks; new tasks appended in the loop below
     tasks: list = list(existing.get("spec", {}).get("tasks", []))
-    
-    # If the user chose NOT to enable base_installroot, we should strip it out 
+
+    # If the user chose NOT to enable base_installroot, we should strip it out
     # from any existing tasks (the "disable" part of the feature).
     if not enable_base:
         for t in tasks:
@@ -615,7 +822,9 @@ def create_cmd(
         elif action == "Reload catalog":
             rprint("[cyan]Reloading catalog...[/cyan]")
             catalog = get_catalog()
-            rprint(f"[green]Catalog reloaded[/green] — {len(catalog)} entries: {', '.join(sorted(catalog.keys()))}")
+            rprint(
+                f"[green]Catalog reloaded[/green] — {len(catalog)} entries: {', '.join(sorted(catalog.keys()))}"
+            )
             continue
 
         elif action == "Add empty task":
@@ -632,15 +841,19 @@ def create_cmd(
                 rprint(f"[green]Task added:[/] {task_name}")
 
         elif action == "Create custom task":
-            task = _create_custom_task(default_plugin=plugin_type)
+            task = _create_custom_task(
+                default_plugin=plugin_type,
+                distro_id=distro_choice.lower(),
+                releasever=codename,
+                arch=arch,
+                base_root=base_root_path,
+            )
             if task:
                 if task.get("plugin") in ("apt", "dnf") and base_root_path:
                     task["base_installroot"] = base_root_path
                 tasks.append(task)
                 rprint(f"[green]Task added:[/] {task['name']}")
-                if questionary.confirm(
-                    "Save to catalog for future reuse?", default=False
-                ).ask():
+                if questionary.confirm("Save to catalog for future reuse?", default=False).ask():
                     _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
 
         else:  # Search catalog
@@ -658,8 +871,10 @@ def create_cmd(
             if not pkg_version:  # cancelled
                 continue
 
-            _add_subtasks(pkg_data, plugin_type, pkg_version, codename, distro_choice.lower(), tasks, catalog)
-            
+            _add_subtasks(
+                pkg_data, plugin_type, pkg_version, codename, distro_choice.lower(), tasks, catalog
+            )
+
             # Inject base_installroot into any newly added subtasks if applicable
             if base_root_path:
                 for t in tasks:
@@ -692,6 +907,7 @@ def create_cmd(
         raise typer.Exit()
 
     save_file = Path(save_path)
+    _materialize_pip_requirements(manifest, save_file)
     _dump_manifest(manifest, save_file)
     rprint(f"[green]{'Updated' if is_update else 'Saved'} {save_file}[/green]")
 
@@ -719,9 +935,7 @@ def create_cmd(
             raise typer.Exit(1)
 
     elif run_choice == "up":
-        inventory_path = questionary.text(
-            "Inventory file path:", default="inventory.yaml"
-        ).ask()
+        inventory_path = questionary.text("Inventory file path:", default="inventory.yaml").ask()
         if not inventory_path or not Path(inventory_path).exists():
             rprint("[red]Valid inventory file is required.[/red]")
             raise typer.Exit(1)

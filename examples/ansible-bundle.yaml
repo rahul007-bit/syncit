@@ -3,7 +3,7 @@ kind: Bundle
 metadata:
   name: ansible-offline
   version: "1.0.0"
-  description: "Offline bundle for ansible RPM and its deps"
+  description: "Offline bundle: ansible runtime RPMs + ansible/collections pip wheels"
 
 spec:
   targets:
@@ -12,9 +12,28 @@ spec:
     arch: amd64
 
   tasks:
-    - name: Install ansible via DNF
+    - name: Install ansible runtime RPMs
       plugin: dnf
+      # Resolve deps against a minimal RHEL9 @core root, so only packages the target
+      # actually lacks get bundled (7 RPMs instead of 111).
+      # Create it once on the packing host:
+      #   dnf install -y --installroot $PWD/base-root --releasever 9 @core
+      # Use an EMPTY dir instead if the target may be thinner than @core (e.g. a container).
+      base_installroot: ./base-root
+      # Empty installroot has no /etc/os-release, so DNF cannot autodetect $releasever
+      releasever: "9"
       packages:
-        - ansible
-        - git-core
+        - python3-pip
         - python3-setuptools
+        - git-core
+        - tar
+        - zip
+        - unzip
+        - curl
+
+    # ansible-core + the `ansible` meta wheel, which carries 108 collections
+    # (ansible.posix 1.5.4, community.general 7.5.1). All wheels, no sdists.
+    - name: Install ansible pip wheels
+      plugin: pip
+      requirements: requirements-ansible.txt
+      python_version: "3.9"

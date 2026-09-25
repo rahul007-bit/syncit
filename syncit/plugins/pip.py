@@ -48,7 +48,7 @@ class PipPlugin(OfflinePlugin):
             errors.append(f"[pip] {e}")
         if "requirements" not in task_spec and "pyproject" not in task_spec:
             errors.append("[pip] Task spec must contain either 'requirements' or 'pyproject' path")
-        for field in ("requirements", "pyproject", "python_version"):
+        for field in ("requirements", "pyproject", "python_version", "extra_index_url"):
             if field in task_spec and not isinstance(task_spec[field], str):
                 errors.append(f"[pip] Field '{field}' must be a string")
         return errors
@@ -66,7 +66,9 @@ class PipPlugin(OfflinePlugin):
                 errors=["Only requirements.txt is supported in Phase 1"],
             )
 
-        python_version = task_spec.get("python_version", f"{sys.version_info.major}.{sys.version_info.minor}")
+        python_version = task_spec.get(
+            "python_version", f"{sys.version_info.major}.{sys.version_info.minor}"
+        )
 
         slug = ctx.task_slug or "default"
         wheel_dir = ctx.bundle_dir / slug
@@ -112,6 +114,9 @@ class PipPlugin(OfflinePlugin):
         ]
         if ctx.no_cache:
             cmd.append("--no-cache-dir")
+        extra_index = task_spec.get("extra_index_url")
+        if extra_index:
+            cmd.extend(["--extra-index-url", extra_index])
 
         def do_run(run_cmd: list[str]) -> subprocess.CompletedProcess:
             if ctx.verbose:
@@ -142,7 +147,20 @@ class PipPlugin(OfflinePlugin):
                 "Source distributions will be compiled on the offline VM.",
                 file=sys.stderr,
             )
-            cmd_retry = [c for c in cmd if c != "--only-binary=:all:"]
+            # When removing --only-binary=:all:, pip also requires removing --python-version
+            # unless --no-deps is set.
+            cmd_retry = []
+            skip_next = False
+            for c in cmd:
+                if skip_next:
+                    skip_next = False
+                    continue
+                if c == "--only-binary=:all:":
+                    continue
+                if c == "--python-version":
+                    skip_next = True
+                    continue
+                cmd_retry.append(c)
             result = do_run(cmd_retry)
             if result.returncode != 0:
                 return PluginResult(

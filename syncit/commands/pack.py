@@ -129,12 +129,12 @@ def run_pack(
         try:
             # 1. Validate the task config first
             validation_errors = plugin.validate(task.config)
-            
+
             # Keep trying to resolve missing dependencies as long as we know how
             while validation_errors:
                 missing_pkg = None
                 install_cmd = None
-                
+
                 # Check for dpkg-scanpackages (dpkg-dev)
                 if any("dpkg-scanpackages" in err for err in validation_errors):
                     if shutil.which("apt-get"):
@@ -152,30 +152,60 @@ def run_pack(
                 # Check for podman/docker/skopeo missing
                 elif any("skopeo', 'docker', nor 'podman'" in err for err in validation_errors):
                     if shutil.which("dnf"):
-                        if subprocess.run(["dnf", "info", "skopeo"], capture_output=True).returncode == 0:
+                        if (
+                            subprocess.run(
+                                ["dnf", "info", "skopeo"], capture_output=True
+                            ).returncode
+                            == 0
+                        ):
                             missing_pkg = "skopeo"
                             install_cmd = ["dnf", "install", "-y", "skopeo"]
-                        elif subprocess.run(["dnf", "info", "podman"], capture_output=True).returncode == 0:
+                        elif (
+                            subprocess.run(
+                                ["dnf", "info", "podman"], capture_output=True
+                            ).returncode
+                            == 0
+                        ):
                             missing_pkg = "podman"
                             install_cmd = ["dnf", "install", "-y", "podman"]
                         else:
                             missing_pkg = "docker"
                             install_cmd = ["dnf", "install", "-y", "docker"]
                     elif shutil.which("yum"):
-                        if subprocess.run(["yum", "info", "skopeo"], capture_output=True).returncode == 0:
+                        if (
+                            subprocess.run(
+                                ["yum", "info", "skopeo"], capture_output=True
+                            ).returncode
+                            == 0
+                        ):
                             missing_pkg = "skopeo"
                             install_cmd = ["yum", "install", "-y", "skopeo"]
-                        elif subprocess.run(["yum", "info", "podman"], capture_output=True).returncode == 0:
+                        elif (
+                            subprocess.run(
+                                ["yum", "info", "podman"], capture_output=True
+                            ).returncode
+                            == 0
+                        ):
                             missing_pkg = "podman"
                             install_cmd = ["yum", "install", "-y", "podman"]
                         else:
                             missing_pkg = "docker"
                             install_cmd = ["yum", "install", "-y", "docker"]
                     elif shutil.which("apt-get"):
-                        if subprocess.run(["apt-cache", "show", "skopeo"], capture_output=True).returncode == 0:
+                        if (
+                            subprocess.run(
+                                ["apt-cache", "show", "skopeo"], capture_output=True
+                            ).returncode
+                            == 0
+                        ):
                             missing_pkg = "skopeo"
                             install_cmd = ["apt-get", "install", "-y", "skopeo"]
-                        elif subprocess.run(["apt-cache", "show", "podman"], capture_output=True).returncode == 0:
+                        elif (
+                            subprocess.run(
+                                ["apt-cache", "show", "podman"], capture_output=True
+                            ).returncode
+                            == 0
+                        ):
                             missing_pkg = "podman"
                             install_cmd = ["apt-get", "install", "-y", "podman"]
                         else:
@@ -191,31 +221,40 @@ def run_pack(
 
                 if missing_pkg and install_cmd:
                     import sys
+
                     if sys.stdout.isatty():
                         import questionary
+
                         if questionary.confirm(
                             f"Command or plugin for '{plugin_name}' is missing. Would you like to install package '{missing_pkg}' automatically? (requires sudo)",
-                            default=True
+                            default=True,
                         ).ask():
                             console.print(f"[cyan]Installing '{missing_pkg}'...[/cyan]")
                             try:
                                 from syncit.plugins.base import run_privileged
+
                                 res = run_privileged(install_cmd, capture_output=True, text=True)
                                 if res.returncode == 0:
-                                    console.print(f"[green]Successfully installed '{missing_pkg}'![/green]")
+                                    console.print(
+                                        f"[green]Successfully installed '{missing_pkg}'![/green]"
+                                    )
                                     # Re-run validation and loop again to catch any other missing packages
                                     validation_errors = plugin.validate(task.config)
                                     continue
                                 else:
-                                    err_console.print(f"[red]Failed to install '{missing_pkg}': {res.stderr.strip()}[/red]")
+                                    err_console.print(
+                                        f"[red]Failed to install '{missing_pkg}': {res.stderr.strip()}[/red]"
+                                    )
                                     break
                             except Exception as e:
                                 err_console.print(f"[red]Error during install: {e}[/red]")
                                 break
                         else:
-                            break # User declined
+                            break  # User declined
                     else:
-                        console.print(f"[yellow]Warning: '{missing_pkg}' is missing, but cannot auto-install because the session is non-interactive. Please install it manually.[/yellow]")
+                        console.print(
+                            f"[yellow]Warning: '{missing_pkg}' is missing, but cannot auto-install because the session is non-interactive. Please install it manually.[/yellow]"
+                        )
                         break
                 else:
                     # We don't know how to resolve the remaining errors

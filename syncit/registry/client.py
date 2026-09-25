@@ -4,7 +4,9 @@ import urllib.error
 from pathlib import Path
 from typing import Any
 
-CATALOG_URL = "https://raw.githubusercontent.com/rahul007-bit/syncit/main/syncit/registry/catalog.json"
+CATALOG_URL = (
+    "https://raw.githubusercontent.com/rahul007-bit/syncit/main/syncit/registry/catalog.json"
+)
 LOCAL_CATALOG = Path(__file__).parent / "catalog.json"
 
 USER_CATALOG = Path.home() / ".config" / "syncit" / "catalog.json"
@@ -78,7 +80,6 @@ def save_to_project_catalog(entry_id: str, entry: dict[str, Any]) -> Path:
     return PROJECT_CATALOG
 
 
-
 def resolve_template(
     template: dict[str, Any],
     version: str,
@@ -126,14 +127,14 @@ def resolve_subtask(
 
     If a ``ref`` key is present, it looks up the referenced path in the catalog
     (e.g., ``kubernetes.subtasks.packages``) and resolves it recursively.
-    Picks ``templates[plugin_type-{distro}]`` first, then ``templates[plugin_type]``; 
+    Picks ``templates[plugin_type-{distro}]`` first, then ``templates[plugin_type]``;
     falls back to ``templates["any"]`` for plugin-agnostic subtasks (OCI images, file downloads, etc.).
     Returns None if no matching template exists for this plugin type.
     """
     if "ref" in subtask:
         if not catalog:
             catalog = get_catalog()
-        
+
         ref_parts = subtask["ref"].split(".")
         curr: Any = catalog
         for part in ref_parts:
@@ -141,22 +142,22 @@ def resolve_subtask(
                 curr = curr[part]
             else:
                 return None
-                
+
         if isinstance(curr, dict):
             return resolve_subtask(curr, plugin_type, version, codename, catalog, distro)
         return None
 
     templates = subtask.get("templates", {})
-    
+
     distro_normalized = distro.lower().replace(" ", "")
-    
+
     template = (
-        templates.get(f"{plugin_type}-{distro_normalized}") or
-        templates.get(f"{plugin_type}-{distro.lower()}") or
-        templates.get(plugin_type) or 
-        templates.get("any")
+        templates.get(f"{plugin_type}-{distro_normalized}")
+        or templates.get(f"{plugin_type}-{distro.lower()}")
+        or templates.get(plugin_type)
+        or templates.get("any")
     )
-    
+
     if not template:
         return None
     return resolve_template(template, version, codename)

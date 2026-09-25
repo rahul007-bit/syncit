@@ -57,6 +57,7 @@ def compute_task_checksum(bundle_dir: Path, task_slug: str) -> str:
 def bundle_dir_name(name: str, version: str) -> str:
     """Return the canonical bundle directory name."""
     import re
+
     name = re.sub(r"[/\\]", "_", name)
     version = re.sub(r"[/\\]", "_", version)
     return f"bundle-{name}-{version}"

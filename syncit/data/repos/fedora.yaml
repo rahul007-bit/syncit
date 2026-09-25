@@ -1,0 +1,75 @@
+# Curated upstream repositories for Fedora targets.
+# Same schema as el.yaml — see that file for details.
+- id: docker-ce
+  label: Docker CE
+  description: Official Docker Engine, CLI, containerd and Buildx from download.docker.com
+  distros: [fedora]
+  repo:
+    baseurl: https://download.docker.com/linux/fedora/$releasever/$basearch/stable
+    gpgkey: https://download.docker.com/linux/fedora/gpg
+    gpgcheck: true
+
+- id: kubernetes
+  label: Kubernetes (pkgs.k8s.io)
+  description: Official kubeadm/kubelet/kubectl packages via pkgs.k8s.io
+  distros: [rhel, rocky, almalinux, centos, fedora]
+  vars:
+    k8s_series:
+      prompt: Kubernetes series (e.g. v1.34)
+      default: v1.34
+  repo:
+    baseurl: https://pkgs.k8s.io/core:/stable:/{k8s_series}/rpm/
+    gpgkey: https://pkgs.k8s.io/core:/stable:/{k8s_series}/rpm/repodata/repomd.xml.key
+    gpgcheck: true
+
+- id: pgdg
+  label: PostgreSQL PGDG
+  description: Official PostgreSQL (14-18) RPMs from the PostgreSQL Global Development Group
+  distros: [rhel, rocky, almalinux, centos, fedora]
+  repo:
+    baseurl: https://download.postgresql.org/pub/repos/yum/common/fedora/fedora-$releasever-$basearch
+    gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
+    gpgcheck: true
+
+- id: grafana
+  label: Grafana
+  description: Grafana OSS + Grafana Agent from rpm.grafana.com
+  distros: [rhel, rocky, almalinux, centos, fedora]
+  repo:
+    baseurl: https://rpm.grafana.com
+    gpgkey: https://rpm.grafana.com/gpg.key
+    gpgcheck: true
+
+- id: rpmfusion-free
+  label: RPM Fusion (Free)
+  description: Community add-ons Fedora/EL won't ship (multimedia, drivers)
+  distros: [fedora, rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: http://download1.rpmfusion.org/free/fedora/updates/$releasever/$basearch/
+    gpgcheck: false
+  repo_overrides:
+    rhel:
+      baseurl: http://download1.rpmfusion.org/free/el/updates/$releasever/$basearch/
+    rocky:
+      baseurl: http://download1.rpmfusion.org/free/el/updates/$releasever/$basearch/
+    almalinux:
+      baseurl: http://download1.rpmfusion.org/free/el/updates/$releasever/$basearch/
+    centos:
+      baseurl: http://download1.rpmfusion.org/free/el/updates/$releasever/$basearch/
+
+- id: rpmfusion-nonfree
+  label: RPM Fusion (Non-Free)
+  description: Nonfree RPM Fusion (NVIDIA drivers, firmware, codecs)
+  distros: [fedora, rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: http://download1.rpmfusion.org/nonfree/fedora/updates/$releasever/$basearch/
+    gpgcheck: false
+  repo_overrides:
+    rhel:
+      baseurl: http://download1.rpmfusion.org/nonfree/el/updates/$releasever/$basearch/
+    rocky:
+      baseurl: http://download1.rpmfusion.org/nonfree/el/updates/$releasever/$basearch/
+    almalinux:
+      baseurl: http://download1.rpmfusion.org/nonfree/el/updates/$releasever/$basearch/
+    centos:
+      baseurl: http://download1.rpmfusion.org/nonfree/el/updates/$releasever/$basearch/

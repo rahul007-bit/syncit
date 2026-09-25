@@ -111,7 +111,9 @@ class DnfPlugin(OfflinePlugin):
             try:
                 res = subprocess.run(["dnf", "download", "--help"], capture_output=True, text=True)
                 if res.returncode != 0 and "No such command: download" in res.stderr:
-                    errors.append("[dnf] DNF download plugin is missing (install 'dnf-plugins-core')")
+                    errors.append(
+                        "[dnf] DNF download plugin is missing (install 'dnf-plugins-core')"
+                    )
             except Exception:
                 pass
 
@@ -141,7 +143,9 @@ class DnfPlugin(OfflinePlugin):
 
         if ctx.no_cache:
             if ctx.verbose:
-                print(f"[dnf] --no-cache: clearing local cache at {cache_dir} and {rpm_cache_dir}...")
+                print(
+                    f"[dnf] --no-cache: clearing local cache at {cache_dir} and {rpm_cache_dir}..."
+                )
             shutil.rmtree(cache_dir, ignore_errors=True)
             shutil.rmtree(rpm_cache_dir, ignore_errors=True)
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -229,6 +233,8 @@ class DnfPlugin(OfflinePlugin):
                 "download",
                 "--resolve",
                 "-y",
+                "--setopt=strict=0",
+                "--setopt=install_weak_deps=False",
                 f"--setopt=cachedir={cache_dir}",
                 "--destdir",
                 str(temp_dl_dir),
@@ -252,18 +258,25 @@ class DnfPlugin(OfflinePlugin):
                 dl_cmd.extend(["--installroot", str(installroot_path)])
                 if ctx.verbose:
                     print(f"[dnf] Resolving deps against installroot: {installroot_path}")
-                
+
                 # RHEL Subscription management fix: copy host entitlements & GPG keys to installroot
                 try:
-                    for pki_dir in ["/etc/pki/entitlement", "/etc/rhsm", "/etc/yum.repos.d", "/etc/pki/rpm-gpg"]:
+                    for pki_dir in [
+                        "/etc/pki/entitlement",
+                        "/etc/rhsm",
+                        "/etc/yum.repos.d",
+                        "/etc/pki/rpm-gpg",
+                    ]:
                         host_path = Path(pki_dir)
                         if host_path.exists() and host_path.is_dir():
-                            ir_path = installroot_path / host_path.relative_to("/")
+                            ir_path = installroot_path / pki_dir.lstrip("/")
                             ir_path.mkdir(parents=True, exist_ok=True)
                             shutil.copytree(str(host_path), str(ir_path), dirs_exist_ok=True)
                 except Exception as e:
                     if ctx.verbose:
-                        print(f"    [dnf] [dim]Note: Could not copy some host entitlements to installroot: {e}[/dim]")
+                        print(
+                            f"    [dnf] [dim]Note: Could not copy some host entitlements to installroot: {e}[/dim]"
+                        )
             else:
                 if ctx.verbose:
                     print(
@@ -279,7 +292,9 @@ class DnfPlugin(OfflinePlugin):
 
             # ── Phase 1.5: Check local RPM file cache (~/.cache/syncit/dnf-rpms) ──
             if not ctx.no_cache:
-                url_cmd = [arg for arg in dl_cmd if arg != "--destdir" and arg != str(temp_dl_dir)] + ["--url"]
+                url_cmd = [
+                    arg for arg in dl_cmd if arg != "--destdir" and arg != str(temp_dl_dir)
+                ] + ["--url"]
                 if ctx.verbose:
                     print("[dnf] Checking package URLs for local cache matching...")
                 url_res = subprocess.run(url_cmd, capture_output=True, text=True)
@@ -287,7 +302,10 @@ class DnfPlugin(OfflinePlugin):
                     cached_count = 0
                     for line in url_res.stdout.splitlines():
                         line = line.strip()
-                        if any(line.startswith(scheme) for scheme in ("http://", "https://", "ftp://", "file://")):
+                        if any(
+                            line.startswith(scheme)
+                            for scheme in ("http://", "https://", "ftp://", "file://")
+                        ):
                             filename = line.split("/")[-1].split("?")[0]
                             cached_file = rpm_cache_dir / filename
                             if cached_file.exists():
@@ -311,10 +329,14 @@ class DnfPlugin(OfflinePlugin):
                                     cached_count += 1
                                 else:
                                     if ctx.verbose:
-                                        print(f"    [dnf] [yellow]Removing invalid/corrupted cache entry: {filename}[/yellow]")
+                                        print(
+                                            f"    [dnf] [yellow]Removing invalid/corrupted cache entry: {filename}[/yellow]"
+                                        )
                                     cached_file.unlink(missing_ok=True)
                     if ctx.verbose and cached_count > 0:
-                        print(f"[dnf] Reusing {cached_count} verified RPM(s) from local cache ({rpm_cache_dir})")
+                        print(
+                            f"[dnf] Reusing {cached_count} verified RPM(s) from local cache ({rpm_cache_dir})"
+                        )
 
             res = _run_cmd(dl_cmd, verbose=ctx.verbose)
             if res.returncode != 0:
@@ -322,11 +344,17 @@ class DnfPlugin(OfflinePlugin):
                 # the host is an unregistered RHEL machine with no access to BaseOS/AppStream.
                 stderr = res.stderr.strip()
                 target_distro = ctx.targets.get("distro", "")
-                
-                if target_distro.lower() in ("rhel", "redhat") and ("No package" in stderr or "nothing provides" in stderr or "Cannot download" in stderr):
+
+                if target_distro.lower() in ("rhel", "redhat") and (
+                    "No package" in stderr
+                    or "nothing provides" in stderr
+                    or "Cannot download" in stderr
+                ):
                     import sys
+
                     if sys.stdout.isatty():
                         import questionary
+
                         err_console.print(f"\n[dnf] [bold red]Resolution Failed:[/] {stderr}")
                         fallback_msg = (
                             "It looks like DNF cannot find standard base OS packages. "
@@ -335,13 +363,21 @@ class DnfPlugin(OfflinePlugin):
                         )
                         if questionary.confirm(fallback_msg, default=False).ask():
                             if ctx.verbose:
-                                print("[dnf] Retrying download with Rocky Linux public fallback repositories...")
-                            dl_cmd.extend([
-                                "--repofrompath", "syncit_fallback_baseos,https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/",
-                                "--repofrompath", "syncit_fallback_appstream,https://dl.rockylinux.org/pub/rocky/$releasever/AppStream/$basearch/os/",
-                                "--enablerepo", "syncit_fallback_baseos",
-                                "--enablerepo", "syncit_fallback_appstream"
-                            ])
+                                print(
+                                    "[dnf] Retrying download with Rocky Linux public fallback repositories..."
+                                )
+                            dl_cmd.extend(
+                                [
+                                    "--repofrompath",
+                                    "syncit_fallback_baseos,https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/",
+                                    "--repofrompath",
+                                    "syncit_fallback_appstream,https://dl.rockylinux.org/pub/rocky/$releasever/AppStream/$basearch/os/",
+                                    "--enablerepo",
+                                    "syncit_fallback_baseos",
+                                    "--enablerepo",
+                                    "syncit_fallback_appstream",
+                                ]
+                            )
                             res = _run_cmd(dl_cmd, verbose=ctx.verbose)
 
                 if res.returncode != 0:
@@ -349,16 +385,15 @@ class DnfPlugin(OfflinePlugin):
                     return PluginResult(False, "Failed to download RPMs", artifacts, errors)
 
             # Copy all resolved RPMs to the bundle.
-            resolved_rpms = [
-                f for f in temp_dl_dir.iterdir()
-                if f.is_file() and f.suffix == ".rpm"
-            ]
+            resolved_rpms = [f for f in temp_dl_dir.iterdir() if f.is_file() and f.suffix == ".rpm"]
             if ctx.verbose:
                 print(f"[dnf] Downloaded/resolved {len(resolved_rpms)} RPM(s) to bundle.")
             for f in resolved_rpms:
                 # Layer 1: Promote successfully downloaded RPMs to permanent cache atomically
                 cache_target = rpm_cache_dir / f.name
-                if not ctx.no_cache and (not cache_target.exists() or cache_target.stat().st_size != f.stat().st_size):
+                if not ctx.no_cache and (
+                    not cache_target.exists() or cache_target.stat().st_size != f.stat().st_size
+                ):
                     try:
                         tmp_cache = cache_target.with_suffix(".rpm.tmp")
                         shutil.copy2(str(f), str(tmp_cache))
@@ -440,7 +475,8 @@ class DnfPlugin(OfflinePlugin):
             artifacts.append(str(repo_path))
 
             res_inst = _run_cmd(
-                ["dnf", "install", "-y", "--disablerepo=*", f"--enablerepo=syncit-{slug}"] + packages,
+                ["dnf", "install", "-y", "--disablerepo=*", f"--enablerepo=syncit-{slug}"]
+                + packages,
                 verbose=getattr(ctx, "verbose", False),
             )
             if res_inst.returncode != 0:

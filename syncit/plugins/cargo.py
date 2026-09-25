@@ -43,6 +43,7 @@ class CargoPlugin(OfflinePlugin):
         projects = task_spec.get("projects", [])
         for task in projects:
             import re
+
             proj_name = re.sub(r"[/\\]", "_", task["project_name"])
             proj_dir = Path(task["project_dir"]).expanduser().resolve()
 
@@ -165,11 +166,15 @@ directory = "vendor"
     def render_apply_sh(self, task_spec: dict[str, Any], bundle_subdir: str) -> str:
         lines = [f'echo "[cargo] Applying rust vendored dependencies..."']
         import shlex
+
         for task in task_spec.get("projects", []):
             import re
+
             proj_name = re.sub(r"[/\\]", "_", task["project_name"])
             proj_dir = task["project_dir"]
-            lines.append(f"cp -r $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/vendor {shlex.quote(proj_dir)}/vendor")
+            lines.append(
+                f"cp -r $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/vendor {shlex.quote(proj_dir)}/vendor"
+            )
             lines.append(f"mkdir -p {shlex.quote(proj_dir)}/.cargo")
             lines.append(
                 f"cat $BUNDLE_DIR/{bundle_subdir}/{shlex.quote(proj_name)}/config.toml.snippet >> {shlex.quote(proj_dir)}/.cargo/config.toml"

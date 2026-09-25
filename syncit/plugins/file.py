@@ -80,7 +80,9 @@ class FilePlugin(OfflinePlugin):
 
         return PluginResult(
             success=len(errors) == 0,
-            message=f"Packed {len(files)} file(s)" if not errors else f"Failed to pack files: {errors}",
+            message=f"Packed {len(files)} file(s)"
+            if not errors
+            else f"Failed to pack files: {errors}",
             artifacts=artifacts,
             errors=errors,
         )
@@ -101,8 +103,10 @@ class FilePlugin(OfflinePlugin):
             src_path = file_dir / filename
             dest_path = Path(f["dest"]).expanduser()
             import os
+
             if not os.path.abspath(dest_path).startswith("/srv/offline"):
                 import sys
+
                 print(f"[file] WARNING: Writing to arbitrary path {dest_path}", file=sys.stderr)
 
             extract_flag = f.get("extract", False)
@@ -120,7 +124,8 @@ class FilePlugin(OfflinePlugin):
                     dest_path.mkdir(parents=True, exist_ok=True)
                     if filename.endswith(".zip"):
                         import zipfile
-                        with zipfile.ZipFile(src_path, 'r') as zip_ref:
+
+                        with zipfile.ZipFile(src_path, "r") as zip_ref:
                             if strip_components > 0:
                                 for member in zip_ref.infolist():
                                     parts = Path(member.filename).parts
@@ -131,13 +136,23 @@ class FilePlugin(OfflinePlugin):
                                             target_file.mkdir(parents=True, exist_ok=True)
                                         else:
                                             target_file.parent.mkdir(parents=True, exist_ok=True)
-                                            with zip_ref.open(member) as source, open(target_file, "wb") as target:
+                                            with (
+                                                zip_ref.open(member) as source,
+                                                open(target_file, "wb") as target,
+                                            ):
                                                 shutil.copyfileobj(source, target)
                             else:
                                 zip_ref.extractall(dest_path)
-                    elif filename.endswith(".tar.gz") or filename.endswith(".tgz") or filename.endswith(".tar"):
+                    elif (
+                        filename.endswith(".tar.gz")
+                        or filename.endswith(".tgz")
+                        or filename.endswith(".tar")
+                    ):
                         import tarfile
-                        mode = 'r:gz' if filename.endswith('.gz') or filename.endswith('.tgz') else 'r'
+
+                        mode = (
+                            "r:gz" if filename.endswith(".gz") or filename.endswith(".tgz") else "r"
+                        )
                         with tarfile.open(src_path, mode) as tar:
                             if strip_components > 0:
                                 members = []
@@ -150,7 +165,9 @@ class FilePlugin(OfflinePlugin):
                             else:
                                 tar.extractall(dest_path)
                     else:
-                        errors.append(f"[file] Unsupported archive format for extraction: {filename}")
+                        errors.append(
+                            f"[file] Unsupported archive format for extraction: {filename}"
+                        )
                         continue
                     artifacts.append(str(dest_path))
                 else:
@@ -196,6 +213,7 @@ class FilePlugin(OfflinePlugin):
             dest = f["dest"]
             import os
             from pathlib import Path
+
             if not os.path.abspath(Path(dest).expanduser()).startswith("/srv/offline"):
                 lines.append(f"echo '[file] WARNING: Writing to arbitrary path {dest}' >&2")
             exec_flag = f.get("executable", False)
@@ -207,22 +225,32 @@ class FilePlugin(OfflinePlugin):
                 if filename.endswith(".zip"):
                     if strip_components > 0:
                         lines.append(f"TMP_ZIP_DIR=$(mktemp -d)")
-                        lines.append(f"unzip -q $BUNDLE_DIR/{bundle_subdir}/{filename} -d $TMP_ZIP_DIR")
                         lines.append(
-                            f"find \"$TMP_ZIP_DIR\" -mindepth {strip_components} -maxdepth {strip_components} "
-                            f"-exec cp -a {{}}/. \"{dest}/\" \\; 2>/dev/null || "
-                            f"find \"$TMP_ZIP_DIR\" -mindepth {strip_components} -maxdepth {strip_components} "
-                            f"-exec cp -a {{}} \"{dest}/\" \\;"
+                            f"unzip -q $BUNDLE_DIR/{bundle_subdir}/{filename} -d $TMP_ZIP_DIR"
                         )
-                        lines.append(f"rm -rf \"$TMP_ZIP_DIR\"")
+                        lines.append(
+                            f'find "$TMP_ZIP_DIR" -mindepth {strip_components} -maxdepth {strip_components} '
+                            f'-exec cp -a {{}}/. "{dest}/" \\; 2>/dev/null || '
+                            f'find "$TMP_ZIP_DIR" -mindepth {strip_components} -maxdepth {strip_components} '
+                            f'-exec cp -a {{}} "{dest}/" \\;'
+                        )
+                        lines.append(f'rm -rf "$TMP_ZIP_DIR"')
                     else:
                         lines.append(f"unzip -q $BUNDLE_DIR/{bundle_subdir}/{filename} -d {dest}")
                 elif filename.endswith(".tar.gz") or filename.endswith(".tgz"):
-                    strip_arg = f" --strip-components={strip_components}" if strip_components > 0 else ""
-                    lines.append(f"tar -xzf $BUNDLE_DIR/{bundle_subdir}/{filename} -C {dest}{strip_arg}")
+                    strip_arg = (
+                        f" --strip-components={strip_components}" if strip_components > 0 else ""
+                    )
+                    lines.append(
+                        f"tar -xzf $BUNDLE_DIR/{bundle_subdir}/{filename} -C {dest}{strip_arg}"
+                    )
                 else:
-                    strip_arg = f" --strip-components={strip_components}" if strip_components > 0 else ""
-                    lines.append(f"tar -xf $BUNDLE_DIR/{bundle_subdir}/{filename} -C {dest}{strip_arg}")
+                    strip_arg = (
+                        f" --strip-components={strip_components}" if strip_components > 0 else ""
+                    )
+                    lines.append(
+                        f"tar -xf $BUNDLE_DIR/{bundle_subdir}/{filename} -C {dest}{strip_arg}"
+                    )
             else:
                 lines.append(f"mkdir -p $(dirname {dest})")
                 lines.append(f"cp $BUNDLE_DIR/{bundle_subdir}/{filename} {dest}")

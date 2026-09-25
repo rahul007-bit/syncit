@@ -75,12 +75,11 @@ def copytree_privileged(src: Path, dest: Path) -> None:
     run_privileged(["cp", "-r", str(src), str(dest)], check=True, capture_output=True)
 
 
-
 @dataclass
 class PackContext:
     bundle_dir: Path  # Root of the bundle being built
     manifest_dir: Path  # Directory containing bundle.yaml (for relative paths)
-    task_slug: str = ""   # URL-safe slug derived from task.name (e.g. "install-kubernetes-packages")
+    task_slug: str = ""  # URL-safe slug derived from task.name (e.g. "install-kubernetes-packages")
     dry_run: bool = False
     verbose: bool = False
     no_cache: bool = False
@@ -91,7 +90,7 @@ class PackContext:
 class ApplyContext:
     bundle_dir: Path  # Root of the bundle to apply
     state_file: Path  # Path to state.json on offline VM
-    task_slug: str = ""   # URL-safe slug derived from task.name (e.g. "install-kubernetes-packages")
+    task_slug: str = ""  # URL-safe slug derived from task.name (e.g. "install-kubernetes-packages")
     dry_run: bool = False
     verbose: bool = False
     force: bool = False  # Re-apply even if state says already done

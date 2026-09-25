@@ -148,6 +148,7 @@ def run_apply(
 
         # Step A (cont.): SSH — extract archive and ensure state directory exists
         import shlex
+
         remote_bundle = f"{host.bundle_dest.rstrip('/')}/{bundle_path.name}"
         bundle_extracted_dir = f"{host.bundle_dest.rstrip('/')}/extracted"
 

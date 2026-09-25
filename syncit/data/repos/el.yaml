@@ -1,0 +1,133 @@
+# Curated upstream repositories for RHEL-family targets (rhel, rocky, almalinux, centos).
+#
+# Schema per entry:
+#   id              short key used as the repo name in the manifest
+#   label           display label in the wizard checkbox
+#   description     one-line description shown in the picker
+#   distros         distro ids this entry supports
+#   repo            dnf repo config: baseurl (+ optional gpgkey, gpgcheck)
+#   repo_overrides  optional per-distro overrides of the repo config
+#   vars            optional {name: {prompt, default}} placeholders rendered as {name}
+#
+# `$releasever`/`$basearch` are substituted by the wizard from the bundle target
+# spec, so the generated manifest is independent of the build host's distro.
+- id: epel
+  label: EPEL
+  description: Extra Packages for Enterprise Linux — huge community repo maintained by the Fedora project
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://dl.fedoraproject.org/pub/epel/$releasever/Everything/$basearch/
+    gpgkey: https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-$releasever
+    gpgcheck: true
+
+- id: docker-ce
+  label: Docker CE
+  description: Official Docker Engine, CLI, containerd and Buildx from download.docker.com
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+    gpgkey: https://download.docker.com/linux/centos/gpg
+    gpgcheck: true
+
+- id: kubernetes
+  label: Kubernetes (pkgs.k8s.io)
+  description: Official kubeadm/kubelet/kubectl packages via pkgs.k8s.io
+  distros: [rhel, rocky, almalinux, centos, fedora]
+  vars:
+    k8s_series:
+      prompt: Kubernetes series (e.g. v1.34)
+      default: v1.34
+  repo:
+    baseurl: https://pkgs.k8s.io/core:/stable:/{k8s_series}/rpm/
+    gpgkey: https://pkgs.k8s.io/core:/stable:/{k8s_series}/rpm/repodata/repomd.xml.key
+    gpgcheck: true
+
+- id: pgdg
+  label: PostgreSQL PGDG
+  description: Official PostgreSQL (14-18) RPMs from the PostgreSQL Global Development Group
+  distros: [rhel, rocky, almalinux, centos, fedora]
+  vars:
+    pgdg_minor:
+      prompt: RHEL minor release used by PGDG mirrors (e.g. 9.6)
+      default: "9.6"
+  repo:
+    baseurl: https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-{pgdg_minor}-$basearch
+    gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
+    gpgcheck: true
+  repo_overrides:
+    fedora:
+      baseurl: https://download.postgresql.org/pub/repos/yum/common/fedora/fedora-$releasever-$basearch
+
+- id: grafana
+  label: Grafana
+  description: Grafana OSS + Grafana Agent from rpm.grafana.com
+  distros: [rhel, rocky, almalinux, centos, fedora]
+  repo:
+    baseurl: https://rpm.grafana.com
+    gpgkey: https://rpm.grafana.com/gpg.key
+    gpgcheck: true
+
+- id: hashicorp
+  label: HashiCorp
+  description: Vault, Terraform, Consul, Nomad official RPMs
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://rpm.releases.hashicorp.com/RHEL/$releasever/$basearch/stable
+    gpgkey: https://rpm.releases.hashicorp.com/gpg
+    gpgcheck: true
+
+- id: mongodb-org
+  label: MongoDB (official)
+  description: MongoDB server 8.0 from repo.mongodb.org
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://repo.mongodb.org/yum/redhat/$releasever/mongodb-org/8.0/$basearch/
+    gpgkey: https://www.mongodb.org/static/pgp/server-8.0.asc
+    gpgcheck: true
+
+- id: influxdata
+  label: InfluxData
+  description: InfluxDB, Telegraf, Chronograf from repos.influxdata.com
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://repos.influxdata.com/rhel/$releasever/$basearch/stable
+    gpgkey: https://repos.influxdata.com/influxdata-archive_compat.key
+    gpgcheck: true
+
+- id: zabbix
+  label: Zabbix
+  description: Zabbix monitoring server/agent from repo.zabbix.com
+  distros: [rhel, rocky, almalinux, centos]
+  vars:
+    zabbix_ver:
+      prompt: Zabbix major version (e.g. 7.0)
+      default: "7.0"
+  repo:
+    baseurl: https://repo.zabbix.com/zabbix/{zabbix_ver}/rhel/$releasever/$basearch/
+    gpgkey: https://repo.zabbix.com/RPM-GPG-KEY-ZABBIX
+    gpgcheck: true
+
+- id: nginx
+  label: nginx (official)
+  description: nginx stable packages from nginx.org
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: https://nginx.org/packages/rhel/$releasever/$basearch/
+    gpgkey: https://nginx.org/keys/nginx_signing.key
+    gpgcheck: true
+
+- id: rpmfusion-free
+  label: RPM Fusion (Free)
+  description: Community add-ons Fedora/EL won't ship (multimedia, drivers)
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: http://download1.rpmfusion.org/free/el/updates/$releasever/$basearch/
+    gpgcheck: false
+
+- id: rpmfusion-nonfree
+  label: RPM Fusion (Non-Free)
+  description: Nonfree RPM Fusion (NVIDIA drivers, firmware, codecs)
+  distros: [rhel, rocky, almalinux, centos]
+  repo:
+    baseurl: http://download1.rpmfusion.org/nonfree/el/updates/$releasever/$basearch/
+    gpgcheck: false

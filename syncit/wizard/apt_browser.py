@@ -398,6 +398,7 @@ def browse_apt_packages(
                     "Select packages (space to toggle, Enter to confirm):",
                     choices=choices,
                     use_search_filter=True,
+                    use_jk_keys=False,
                 ).ask()
                 or []
             )

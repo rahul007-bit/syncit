@@ -156,6 +156,7 @@ def browse_oci_images(
                         f"Select images (page {page}, {len(fetched)}/{total} shown; space to toggle):",
                         choices=choices,
                         use_search_filter=True,
+                        use_jk_keys=False,
                     ).ask()
                     or []
                 )

@@ -438,6 +438,7 @@ def _prompt_upstream_repos(
                         for e in entries
                     ],
                     use_search_filter=True,
+                    use_jk_keys=False,
                 ).ask()
                 or []
             )

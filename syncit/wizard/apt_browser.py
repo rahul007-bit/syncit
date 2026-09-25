@@ -76,6 +76,37 @@ def _fetch_gpg_key(gpg_key_url: str, dest: Path) -> Path | None:
         return None
 
 
+def _uri_suite(source_line: str) -> tuple[str, str]:
+    parts = source_line.split()
+    if len(parts) >= 3:
+        return (parts[1], parts[2])
+    return (source_line, "")
+
+
+def _host_covered_pairs() -> set[tuple[str, str]]:
+    """(uri, suite) pairs already configured on the host — wizard duplicates
+    of these would conflict on the Trusted option."""
+    from syncit.wizard.host_repos import _parse_apt_deb822_file, _parse_apt_list_file
+
+    pairs: set[tuple[str, str]] = set()
+    files: list[Path] = []
+    main = Path("/etc/apt/sources.list")
+    if main.is_file():
+        files.append(main)
+    sys_d = Path("/etc/apt/sources.list.d")
+    if sys_d.is_dir():
+        files.extend(sorted(sys_d.glob("*.list")))
+        files.extend(sorted(sys_d.glob("*.sources")))
+    for f in files:
+        if f.suffix == ".sources":
+            for _, line, _ in _parse_apt_deb822_file(f):
+                pairs.add(_uri_suite(line))
+        else:
+            for _, line in _parse_apt_list_file(f):
+                pairs.add(_uri_suite(line))
+    return pairs
+
+
 def _build_temp_sources(repos: list[dict], with_host_sources: bool = True) -> Path:
     """Create a temp apt sources dir: selected wizard repos (+ host system sources)."""
     temp = Path(tempfile.mkdtemp(prefix="syncit-apt-wizard-"))
@@ -87,11 +118,20 @@ def _build_temp_sources(repos: list[dict], with_host_sources: bool = True) -> Pa
     if with_host_sources and main.is_file():
         (temp / "sources.list").write_text(main.read_text(encoding="utf-8"))
 
-    repo_lines = []
+    covered = _host_covered_pairs() if with_host_sources else set()
+    repo_lines: list[str] = []
+    seen_pairs: set[tuple[str, str]] = set(covered)
     for repo in repos:
         url = repo.get("url", "")
         if not url:
             continue
+        pair = _uri_suite(url)
+        if pair in seen_pairs:
+            rprint(
+                f"[dim]  {repo.get('name', '?')}: already provided by host sources — not duplicating[/dim]"
+            )
+            continue
+        seen_pairs.add(pair)
         signed_by = None
         gpg_key = repo.get("gpg_key")
         if gpg_key:

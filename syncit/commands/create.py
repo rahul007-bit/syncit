@@ -426,6 +426,7 @@ def _prompt_apt_dnf_task(
                 releasever,
                 repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64"),
                 installroot=installroot or None,
+                add_repos=lambda: _prompt_upstream_repos("dnf", distro_id, releasever, arch),
             )
         elif (
             not live_ok

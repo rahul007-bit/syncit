@@ -298,87 +298,71 @@ def browse_dnf_packages(
     releasever: str,
     basearch: str,
     installroot: str | None = None,
+    add_repos=None,
 ) -> list[str]:
     """
     Interactive search/select loop. Returns a list of pinned nevra strings,
     or [] if the user cancels / nothing selected.
+
+    `add_repos`: optional callable returning extra repo dicts; enables the
+    "Add more upstream repos" action so repos and packages can be interleaved.
     """
     if not shutil.which("dnf"):
         rprint(
             "[yellow]dnf not available on this machine — skipping live package browsing.[/yellow]"
         )
         return []
-    if not repos:
+    if not repos and not add_repos:
         rprint(
             "[yellow]No upstream repos selected — live browsing needs at least one repo (system repos are disabled in the wizard).[/yellow]"
         )
         return []
 
-    warm_metadata(repos, releasever, basearch)
-    rprint("[cyan]Type a package name prefix to search (blank to finish).[/cyan]")
-    selected: list[str] = []
-
-    while True:
-        term = questionary.text("Search packages (type name, press Enter; blank to finish):").ask()
-        if not term or not term.strip():
-            break
-        matches = search_packages(repos, releasever, basearch, term)
-        if not matches:
-            rprint("[yellow]No matches. Try a shorter prefix.[/yellow]")
-            continue
-        choices = [questionary.Choice(title=f"{n:<38}  {s[:60]}", value=n) for n, s in matches]
-        picked = (
-            questionary.checkbox(
-                "Select packages (space to toggle, Enter to confirm):",
-                choices=choices,
+    def _search_round() -> None:
+        """One search/select cycle; appends to `selected`."""
+        while True:
+            if not repos:
+                rprint("[yellow]Add an upstream repo first (search needs at least one).[/yellow]")
+                break
+            term = questionary.text(
+                "Search packages (type name, press Enter; blank to finish):"
             ).ask()
-            or []
-        )
-        if not picked:
-            rprint(
-                "[yellow]Nothing selected — press <space> to toggle items, then Enter to confirm.[/yellow]"
+            if not term or not term.strip():
+                break
+            matches = search_packages(repos, releasever, basearch, term)
+            if not matches:
+                rprint("[yellow]No matches. Try a shorter prefix.[/yellow]")
+                continue
+            choices = [questionary.Choice(title=f"{n:<38}  {s[:60]}", value=n) for n, s in matches]
+            picked = (
+                questionary.checkbox(
+                    "Select packages (space to toggle, Enter to confirm):",
+                    choices=choices,
+                ).ask()
+                or []
             )
-        for name in picked:
-            if name in selected:
-                continue
-            versions = list_versions(repos, releasever, basearch, name)
-            if not versions:
-                rprint(f"[yellow]Skipping {name}: no versions found.[/yellow]")
-                continue
-            nevra = questionary.select(
-                f"Version for {name}:",
-                choices=[questionary.Choice(title=v, value=v) for v in versions],
-            ).ask()
-            if not nevra:
-                continue
-            selected.append(nevra)
-            rprint(f"[green]Added:[/] {nevra}")
+            if not picked:
+                rprint(
+                    "[yellow]Nothing selected — press <space> to toggle items, then Enter to confirm.[/yellow]"
+                )
+            for name in picked:
+                if name in selected:
+                    continue
+                versions = list_versions(repos, releasever, basearch, name)
+                if not versions:
+                    rprint(f"[yellow]Skipping {name}: no versions found.[/yellow]")
+                    continue
+                nevra = questionary.select(
+                    f"Version for {name}:",
+                    choices=[questionary.Choice(title=v, value=v) for v in versions],
+                ).ask()
+                if not nevra:
+                    continue
+                selected.append(nevra)
+                rprint(f"[green]Added:[/] {nevra}")
 
-    if not selected:
-        return []
-
-    action = questionary.select(
-        "Package selection:",
-        choices=[
-            "Review / remove packages",
-            "Pin full dependency closure (recommended)",
-            "Use as-is",
-            "Cancel browsing",
-        ],
-    ).ask()
-    if action is None or action == "Cancel browsing":
-        return []
-    if action == "Review / remove packages":
-        keep = (
-            questionary.checkbox(
-                "Keep these packages (uncheck to remove):",
-                choices=[questionary.Choice(title=s, value=s, checked=True) for s in selected],
-            ).ask()
-            or []
-        )
-        selected = [s for s in selected if s in keep]
-
-    if action in ("Pin full dependency closure (recommended)", "Review / remove packages"):
+    def _pin_closure() -> list[str] | None:
+        """Resolve + verify closure. Returns final pin list, or None to go back to the menu."""
         rprint("[cyan]Resolving transitive dependencies...[/cyan]")
         deps = resolve_deps(repos, releasever, basearch, selected, installroot=installroot)
         total = sum(size for _, size in deps)
@@ -388,19 +372,21 @@ def browse_dnf_packages(
         if len(deps) > 40:
             rprint(f"[dim]  ... and {len(deps) - 40} more[/dim]")
         if (
-            deps
-            and questionary.confirm(
+            not deps
+            or not questionary.confirm(
                 "Pin all resolved dependencies into the manifest?", default=True
             ).ask()
         ):
-            top_names = {s.rsplit("-", 2)[0] for s in selected}
-            pinned = list(selected)
-            for dep, _ in deps:
-                if dep.rsplit("-", 2)[0] not in top_names and dep not in pinned:
-                    pinned.append(dep)
-            # Verify the pin set with the SAME solver `syncit pack` uses —
-            # otherwise a repo with a broken dep chain (e.g. a meta-package
-            # whose provider is missing) fails later at pack time.
+            return None
+        top_names = {s.rsplit("-", 2)[0] for s in selected}
+        pinned = list(selected)
+        for dep, _ in deps:
+            if dep.rsplit("-", 2)[0] not in top_names and dep not in pinned:
+                pinned.append(dep)
+        # Verify the pin set with the SAME solver `syncit pack` uses —
+        # otherwise a repo with a broken dep chain (e.g. a meta-package
+        # whose provider is missing) fails later at pack time.
+        while True:
             rprint("[cyan]Verifying pin set with dnf's solver (same as pack)...[/cyan]")
             download_set, error = resolve_download_set(
                 repos, releasever, basearch, pinned, installroot=installroot
@@ -411,10 +397,80 @@ def browse_dnf_packages(
             if error:
                 for line in error.splitlines():
                     rprint(f"[yellow]  {line}[/yellow]")
+            # Auto-recovery: parse "needed by X" from the solver error and
+            # offer to drop the offending package, then re-verify.
+            culprits = re.findall(r"needed by (\S+)", error or "")
+            culprits = [c for c in culprits if c in pinned]
+            if (
+                culprits
+                and questionary.confirm(
+                    f"Drop {', '.join(culprits)} and retry? (its requirements will be met by alternatives)",
+                    default=True,
+                ).ask()
+            ):
+                pinned = [p for p in pinned if p not in culprits]
+                if not pinned:
+                    return None
+                continue
             if questionary.confirm(
                 "Keep top-level packages only and let pack resolve deps at pack time?",
                 default=True,
             ).ask():
-                return selected
+                return list(selected)
+            return None
+
+    if repos:
+        warm_metadata(repos, releasever, basearch)
+    rprint(
+        "[cyan]Search packages, add repos, or finish — your selection is kept between steps.[/cyan]"
+    )
+    selected: list[str] = []
+    _search_round()
+
+    while True:
+        if not selected:
+            _search_round()
+            if not selected:
+                return []
+        choices: list[str] = []
+        if add_repos:
+            choices.append("Add more upstream repos")
+        choices += [
+            "Search packages",
+            "Review / remove packages",
+            "Pin full dependency closure (recommended)",
+            "Use as-is",
+            "Cancel browsing",
+        ]
+        action = questionary.select("Package selection:", choices=choices).ask()
+        if action is None or action == "Cancel browsing":
             return []
-    return selected
+        if action == "Use as-is":
+            return selected
+        if action == "Add more upstream repos":
+            added = add_repos() if add_repos else []
+            known = {r.get("name") for r in repos}
+            new = [r for r in (added or []) if r.get("name") not in known]
+            if new:
+                repos.extend(new)
+                warm_metadata(new, releasever, basearch)
+                rprint(f"[green]Repo(s) added:[/] {', '.join(r['name'] for r in new)}")
+            continue
+        if action == "Search packages":
+            _search_round()
+            continue
+        if action == "Review / remove packages":
+            keep = (
+                questionary.checkbox(
+                    "Keep these packages (uncheck to remove):",
+                    choices=[questionary.Choice(title=s, value=s, checked=True) for s in selected],
+                ).ask()
+                or []
+            )
+            selected = [s for s in selected if s in keep]
+            continue
+        # Pin full dependency closure
+        result = _pin_closure()
+        if result is not None:
+            return result
+        # None -> back to the action menu (selection unchanged)

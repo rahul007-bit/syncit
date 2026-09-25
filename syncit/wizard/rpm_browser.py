@@ -83,7 +83,12 @@ def warm_metadata(repos: list[dict], releasever: str, basearch: str) -> bool:
     Download repo metadata into the wizard cache with live progress.
     Returns True if makecache succeeded (or was already cached).
     """
-    cmd = ["dnf", "makecache", "-y", *_base_args(releasever, basearch), *build_repo_opts(repos)]
+    # makecache does not accept --arch (nor --releasever-only semantics);
+    # build a minimal arg set: disablerepo + cachedir + injected repos.
+    args = ["--disablerepo=*", "--setopt=cachedir=" + str(WIZARD_CACHE_DIR)]
+    if releasever:
+        args.extend(["--releasever", releasever])
+    cmd = ["dnf", "makecache", "-y", *args, *build_repo_opts(repos)]
     rprint("[cyan]Downloading repo metadata (first run per repo set — later searches are instant)...[/cyan]")
     try:
         rc = _run_streaming(cmd)

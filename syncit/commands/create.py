@@ -807,6 +807,7 @@ def create_cmd(
         action = questionary.select(
             "What next?",
             choices=[
+                "Browse repos & packages",
                 "Search catalog",
                 "Create custom task",
                 "Add empty task",
@@ -825,6 +826,25 @@ def create_cmd(
             rprint(
                 f"[green]Catalog reloaded[/green] — {len(catalog)} entries: {', '.join(sorted(catalog.keys()))}"
             )
+            continue
+
+        elif action == "Browse repos & packages":
+            task_name = questionary.text("Task name:").ask()
+            if task_name:
+                task = _prompt_apt_dnf_task(
+                    task_name,
+                    plugin_type,
+                    distro_id=distro_choice.lower(),
+                    releasever=codename,
+                    arch=arch,
+                    base_root=base_root_path,
+                )
+                if task.get("plugin") in ("apt", "dnf") and base_root_path:
+                    task["base_installroot"] = base_root_path
+                tasks.append(task)
+                rprint(f"[green]Task added:[/] {task['name']}")
+                if questionary.confirm("Save to catalog for future reuse?", default=False).ask():
+                    _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
             continue
 
         elif action == "Add empty task":

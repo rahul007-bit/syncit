@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -89,14 +90,18 @@ def warm_metadata(repos: list[dict], releasever: str, basearch: str) -> bool:
     if releasever:
         args.extend(["--releasever", releasever])
     cmd = ["dnf", "makecache", "-y", *args, *build_repo_opts(repos)]
-    rprint("[cyan]Downloading repo metadata (first run per repo set — later searches are instant)...[/cyan]")
+    rprint(
+        "[cyan]Downloading repo metadata (first run per repo set — later searches are instant)...[/cyan]"
+    )
     try:
         rc = _run_streaming(cmd)
     except subprocess.TimeoutExpired:
         rprint("[yellow]Metadata download timed out — continuing with partial cache.[/yellow]")
         return False
     if rc != 0:
-        rprint("[yellow]Metadata fetch had errors — some repos may be unavailable. Trying anyway.[/yellow]")
+        rprint(
+            "[yellow]Metadata fetch had errors — some repos may be unavailable. Trying anyway.[/yellow]"
+        )
         return False
     rprint("[green]Repo metadata ready.[/green]")
     return True
@@ -114,6 +119,8 @@ def search_packages(
 ) -> list[tuple[str, str]]:
     """Search packages across the wizard repos. Returns [(name, summary)]."""
     term = term.strip()
+    rprint(f"[cyan]Searching {len(repos)} repo(s) for '{term}'... (Ctrl-C to cancel)[/cyan]")
+    t0 = time.time()
     cmd = [
         "dnf",
         "repoquery",
@@ -124,8 +131,9 @@ def search_packages(
         f"{term}*",
     ]
     res = _run(cmd, timeout=600)
+    elapsed = time.time() - t0
     if res.returncode != 0:
-        _fail(res, f"repoquery '{term}'")
+        _fail(res, f"repoquery '{term}' ({elapsed:.1f}s)")
         return []
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
@@ -143,6 +151,22 @@ def search_packages(
                 f"[yellow]Result list truncated to first {limit} matches — refine your search for more.[/yellow]"
             )
             break
+    if not out:
+        # rc=0 but no matches: show what dnf actually said so a silent
+        # metadata re-download or repo error is visible
+        detail = (res.stderr or "").strip().splitlines()
+        rprint(
+            f"[yellow]dnf returned 0 matches in {elapsed:.1f}s."
+            + (
+                " Metadata may still be downloading or repos may have failed:"
+                + " | ".join(detail[-2:])
+                if detail
+                else ""
+            )
+            + "[/yellow]"
+        )
+    else:
+        rprint(f"[green]Found {len(out)} match(es) in {elapsed:.1f}s[/green]")
     return out
 
 

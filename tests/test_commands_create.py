@@ -140,8 +140,9 @@ def test_create_cmd_interactive_workflow(
         MagicMock(ask=lambda: "Search catalog"),  # Select 5: What next?
         MagicMock(ask=lambda: "postgresql"),  # Select 6: Catalog search selection
         MagicMock(ask=lambda: "latest"),  # Select 7: Version selection
-        MagicMock(ask=lambda: "Done"),  # Select 8: What next? (breaks loop)
-        MagicMock(ask=lambda: "none"),  # Select 9: Run choice
+        MagicMock(ask=lambda: "Done"),  # Select 8: What next? (opens review)
+        MagicMock(ask=lambda: "Save bundle"),  # Select 9: Review screen
+        MagicMock(ask=lambda: "none"),  # Select 10: Run choice
     ]
 
     mock_text.side_effect = [
@@ -203,6 +204,7 @@ def test_create_cmd_update_mode_preserves_manifest(
     mock_select.side_effect = [
         MagicMock(ask=lambda: "Continue with current metadata"),  # metadata menu
         MagicMock(ask=lambda: "Done"),  # What next?
+        MagicMock(ask=lambda: "Save bundle"),  # Review screen
         MagicMock(ask=lambda: "none"),  # Run now?
     ]
     mock_text.side_effect = [

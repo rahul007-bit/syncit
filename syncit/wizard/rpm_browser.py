@@ -411,12 +411,15 @@ def browse_dnf_packages(
     basearch: str,
     installroot: str | None = None,
     add_repos=None,
+    initial: list[str] | None = None,
 ) -> list[str] | None:
     """
     Interactive search/select loop. Returns a list of pinned nevra strings,
     [] if the user finished without selecting anything, or None when the
     user explicitly cancels ("Cancel browsing" / Ctrl+C).
 
+    `initial`: existing selection to preload (edit flow) — the user lands
+    directly on the action menu with those pins checked in.
     `add_repos`: optional callable returning extra repo dicts; enables the
     "Add more upstream repos" action so repos and packages can be interleaved.
     """
@@ -573,8 +576,11 @@ def browse_dnf_packages(
     rprint(
         "[cyan]Search packages, add repos, or finish — your selection is kept between steps.[/cyan]"
     )
-    selected: list[str] = []
-    _search_round()
+    selected: list[str] = list(initial or [])
+    if selected:
+        rprint(f"[cyan]Loaded {len(selected)} existing selection(s) — review or add more.[/cyan]")
+    else:
+        _search_round()
 
     while True:
         if not selected:

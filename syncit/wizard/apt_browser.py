@@ -358,12 +358,13 @@ def browse_apt_packages(
     repos: list[dict],
     codename: str = "",
     installroot: str | None = None,
-    add_repos: Callable[[], list[dict]] | None = None,
+    add_repos: Callable[[], list[dict] | None] | None = None,
+    initial: list[str] | None = None,
 ) -> list[str] | None:
     """
     Interactive search/select loop. Returns "name=version" pin strings
     ([] if finished with nothing selected, None if the user explicitly
-    cancels / Ctrl+C).
+    cancels / Ctrl+C). `initial` preloads an existing selection (edit flow).
     """
     if not shutil.which("apt-get"):
         rprint(
@@ -380,7 +381,7 @@ def browse_apt_packages(
     rprint(
         "[cyan]Search packages, add repos, or finish — your selection is kept between steps.[/cyan]"
     )
-    selected: list[str] = []  # "name=version" pins
+    selected: list[str] = list(initial or [])  # "name=version" pins
     sort_mode = "relevance"
 
     def _search_round() -> bool:
@@ -448,7 +449,10 @@ def browse_apt_packages(
             return None
         return download_set
 
-    _search_round()
+    if selected:
+        rprint(f"[cyan]Loaded {len(selected)} existing selection(s) — review or add more.[/cyan]")
+    else:
+        _search_round()
     while True:
         if not selected:
             if _search_round():

@@ -260,16 +260,18 @@ _SORT_LABELS = {
 def browse_oci_images(
     registries: list[str] | None = None,
     prompt_label: str = "Docker Hub",
+    initial: list[str] | None = None,
 ) -> list[str] | None:
     """
     Interactive Docker Hub search/select loop with pagination ("fetch more")
     and sorting (relevance / stars / pulls / name). Returns image references
     ("nginx:1.29", "bitnami/redis:7.4") suitable for the oci_image plugin,
-    or None when the user explicitly cancels.
+    or None when the user explicitly cancels. `initial` preloads an existing
+    selection (edit flow).
     """
     if not sys.stdout.isatty():
         return []
-    selected: list[str] = []
+    selected: list[str] = list(initial or [])
     sort_mode = "relevance"
 
     def _search_round() -> bool:
@@ -335,7 +337,9 @@ def browse_oci_images(
                 else:
                     break
 
-    if _search_round():
+    if selected:
+        rprint(f"[cyan]Loaded {len(selected)} existing image(s) — review or add more.[/cyan]")
+    elif _search_round():
         return None
     while True:
         if not selected:

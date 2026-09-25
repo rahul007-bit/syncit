@@ -449,14 +449,198 @@ def _finalize_task(task: dict, tasks: list, base_root_path: str, plugin_type: st
         _save_custom_task_to_catalog(task, task.get("plugin", plugin_type))
 
 
+def _edit_task(task: dict, distro_id: str, releasever: str, arch: str, base_root_path: str) -> None:
+    """Field-level in-place edit of one task (used by the review screen)."""
+    from syncit.wizard import history as wiz_history
+
+    while True:
+        rprint(f"\n[cyan]Editing: {_task_summary([task])}[/cyan]")
+        plugin = task.get("plugin", "?")
+        choices: list[questionary.Choice] = [
+            questionary.Choice(title="Rename task", value="rename")
+        ]
+        if plugin in ("apt", "dnf"):
+            choices += [
+                questionary.Choice(title="Edit packages (live browser)", value="packages"),
+                questionary.Choice(title="Edit upstream repos", value="repos"),
+            ]
+        elif plugin == "pip":
+            choices += [
+                questionary.Choice(title="Edit packages (inline list)", value="packages"),
+                questionary.Choice(title="Edit requirements.txt path", value="requirements"),
+            ]
+        elif plugin == "oci_image":
+            choices.append(questionary.Choice(title="Edit images (live browser)", value="images"))
+        elif plugin == "file":
+            choices.append(questionary.Choice(title="Edit files (re-enter)", value="files"))
+        choices.append(questionary.Choice(title="Back", value="back"))
+        field = questionary.select("Edit which field?", choices=choices).ask()
+        if field is None or field == "back":
+            return
+
+        if field == "rename":
+            new = wiz_history.prompt_with_history(
+                "task_name", "Task name:", default=task.get("name", "")
+            )
+            if new:
+                task["name"] = new
+        elif field == "packages" and plugin in ("apt", "dnf"):
+            repos = task.get("repos", [])
+            populated = (
+                (
+                    _dnf_root_populated(Path(base_root_path))
+                    if plugin == "dnf"
+                    else _apt_root_populated(Path(base_root_path))
+                )
+                if base_root_path
+                else False
+            )
+            installroot = base_root_path if populated else None
+            if plugin == "dnf":
+                result = browse_dnf_packages(
+                    repos,
+                    releasever,
+                    repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64"),
+                    installroot=installroot,
+                    add_repos=lambda: _prompt_upstream_repos("dnf", distro_id, releasever, arch),
+                    initial=task.get("packages", []),
+                )
+            else:
+                result = browse_apt_packages(
+                    repos,
+                    codename=releasever,
+                    installroot=installroot,
+                    add_repos=lambda: _prompt_upstream_repos("apt", distro_id, releasever, arch),
+                    initial=task.get("packages", []),
+                )
+            if result is not None:
+                task["packages"] = result
+        elif field == "repos":
+            repos = _prompt_upstream_repos(
+                plugin, distro_id, releasever, arch, prev_repos=task.get("repos") or None
+            )
+            if repos is None:
+                continue  # cancelled — keep current repos
+            if repos:
+                task["repos"] = repos
+            else:
+                task.pop("repos", None)
+        elif field == "packages" and plugin == "pip":
+            pkg_str = questionary.text(
+                "Python packages (comma-separated):",
+                default=", ".join(task.get("packages", [])),
+            ).ask()
+            if pkg_str is not None:
+                task["packages"] = [p.strip() for p in pkg_str.split(",") if p.strip()]
+        elif field == "requirements":
+            new = wiz_history.prompt_with_history(
+                "requirements_path", "requirements.txt path (blank to clear):"
+            )
+            if new is None:
+                continue
+            if new:
+                task["requirements"] = new
+                task.pop("_inline_packages", None)
+            else:
+                task.pop("requirements", None)
+                task["_inline_packages"] = True
+        elif field == "images":
+            from syncit.wizard.oci_browser import browse_oci_images
+
+            result = browse_oci_images(
+                registries=["quay.io", "ghcr.io"], initial=task.get("images", [])
+            )
+            if result is not None:
+                task["images"] = result
+        elif field == "files":
+            new_task = _prompt_file_task(task.get("name", "file"))
+            if new_task is not None:
+                task["files"] = new_task.get("files", [])
+
+
+def _review_tasks(
+    tasks: list, distro_id: str, releasever: str, arch: str, base_root_path: str
+) -> bool:
+    """
+    Review screen before saving. Returns True to proceed to save, False to
+    go back to the task menu.
+    """
+    while True:
+        rprint("\n[bold]Review bundle[/bold]")
+        if not tasks:
+            rprint("[yellow]No tasks in this bundle.[/yellow]")
+        for i, t in enumerate(tasks, 1):
+            rprint(f"  [cyan]{i}.[/cyan] {_task_summary([t])}")
+        action = questionary.select(
+            "Review:",
+            choices=[
+                "Save bundle",
+                "Edit a task",
+                "Remove a task",
+                "Move a task",
+                "Back to task menu",
+            ],
+        ).ask()
+        if action is None or action == "Save bundle":
+            return True
+        if action == "Back to task menu":
+            return False
+        if not tasks:
+            continue
+
+        if action == "Edit a task":
+            idx = questionary.select(
+                "Edit which task?",
+                choices=[
+                    questionary.Choice(title=_task_summary([t]), value=i)
+                    for i, t in enumerate(tasks)
+                ]
+                + [questionary.Choice(title="Back", value=-1)],
+            ).ask()
+            if idx is not None and idx != -1:
+                _edit_task(tasks[idx], distro_id, releasever, arch, base_root_path)
+        elif action == "Remove a task":
+            idx = questionary.select(
+                "Remove which task?",
+                choices=[
+                    questionary.Choice(title=_task_summary([t]), value=i)
+                    for i, t in enumerate(tasks)
+                ]
+                + [questionary.Choice(title="Back", value=-1)],
+            ).ask()
+            if idx is not None and idx != -1:
+                removed = tasks.pop(idx)
+                rprint(f"[yellow]Task removed:[/] {removed.get('name', '?')}")
+        elif action == "Move a task":
+            idx = questionary.select(
+                "Move which task?",
+                choices=[
+                    questionary.Choice(title=_task_summary([t]), value=i)
+                    for i, t in enumerate(tasks)
+                ]
+                + [questionary.Choice(title="Back", value=-1)],
+            ).ask()
+            if idx is None or idx == -1:
+                continue
+            direction = questionary.select("Move:", choices=["Up", "Down", "Back"]).ask()
+            if direction == "Up" and idx > 0:
+                tasks[idx - 1], tasks[idx] = tasks[idx], tasks[idx - 1]
+            elif direction == "Down" and idx < len(tasks) - 1:
+                tasks[idx + 1], tasks[idx] = tasks[idx], tasks[idx + 1]
+
+
 def _prompt_upstream_repos(
     plugin: str,
     distro_id: str = "",
     releasever: str = "",
     arch: str = "amd64",
     prev_repos: list[dict] | None = None,
-) -> list[dict]:
-    """Interactive multi-repo picker: curated catalog (dnf) + custom entries."""
+) -> list[dict] | None:
+    """Interactive multi-repo picker: curated catalog (dnf) + custom entries.
+
+    Returns the selected repo list (possibly empty), or None when the user
+    presses Ctrl+C (callers distinguish cancel from an empty selection).
+    """
     repos: list[dict] = []
     if prev_repos:
         names = ", ".join(r.get("name", "") for r in prev_repos[:4])
@@ -470,7 +654,9 @@ def _prompt_upstream_repos(
             choices.append("Remove added repo(s)")
         choices += ["Add custom repo", f"Done ({len(repos)} repo(s))"]
         action = questionary.select("Upstream repos:", choices=choices).ask()
-        if action is None or action.startswith("Done"):
+        if action is None:
+            return None
+        if action.startswith("Done"):
             if repos:
                 from syncit.wizard.history import record_repo_set
 
@@ -635,6 +821,8 @@ def _prompt_apt_dnf_task(
     repos = _prompt_upstream_repos(
         plugin, distro_id, releasever, arch, prev_repos=prev[0] if prev else None
     )
+    if repos is None:
+        return None
     if repos:
         task["repos"] = repos
 
@@ -1251,7 +1439,9 @@ def create_cmd(
 
         # User pressed Ctrl+C on the action menu — treat as Done
         if action is None or action == "Done":
-            break
+            if _review_tasks(tasks, distro_choice.lower(), codename, arch, base_root_path):
+                break
+            continue
 
         elif action == "Browse packages & images":
             while True:

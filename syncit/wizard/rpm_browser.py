@@ -234,6 +234,56 @@ def resolve_deps(
     return out
 
 
+def resolve_download_set(
+    repos: list[dict],
+    releasever: str,
+    basearch: str,
+    pkgs: list[str],
+    installroot: str | None = None,
+) -> tuple[list[str], str | None]:
+    """
+    Run `dnf download --url --resolve` — the exact solver DnfPlugin.pack() uses —
+    against the candidate pin list. Returns (package_strings, error_or_None).
+    Package strings are derived from RPM filenames (name-version-release.arch).
+    """
+    if not pkgs:
+        return [], None
+    cmd = [
+        "dnf",
+        "download",
+        "--url",
+        "--resolve",
+        "-y",
+        "--setopt=strict=0",
+        "--setopt=install_weak_deps=False",
+        "--setopt=cachedir=" + str(WIZARD_CACHE_DIR),
+        *build_repo_opts(repos),
+        "--arch",
+        f"{basearch},noarch",
+    ]
+    if releasever:
+        cmd.extend(["--releasever", releasever])
+    if installroot:
+        cmd.extend(["--installroot", installroot])
+    cmd.extend(pkgs)
+    res = _run(cmd, timeout=900)
+    if res.returncode != 0:
+        detail = (res.stderr or res.stdout or "").strip().splitlines()
+        problem = [
+            l for l in detail if "Problem" in l or "nothing provides" in l or "conflicting" in l
+        ]
+        return [], "\n".join(problem[-6:] or detail[-6:])
+    out: list[str] = []
+    for line in res.stdout.splitlines():
+        line = line.strip()
+        if not any(line.startswith(s) for s in ("http://", "https://", "ftp://", "file://")):
+            continue
+        filename = line.split("/")[-1].split("?")[0]
+        if filename.endswith(".rpm"):
+            out.append(filename[:-4])
+    return list(dict.fromkeys(out)), None
+
+
 def _human_size(n: int) -> str:
     size = float(n)
     for unit in ("B", "KB", "MB", "GB"):
@@ -284,6 +334,10 @@ def browse_dnf_packages(
             ).ask()
             or []
         )
+        if not picked:
+            rprint(
+                "[yellow]Nothing selected — press <space> to toggle items, then Enter to confirm.[/yellow]"
+            )
         for name in picked:
             if name in selected:
                 continue
@@ -344,5 +398,23 @@ def browse_dnf_packages(
             for dep, _ in deps:
                 if dep.rsplit("-", 2)[0] not in top_names and dep not in pinned:
                     pinned.append(dep)
-            return pinned
+            # Verify the pin set with the SAME solver `syncit pack` uses —
+            # otherwise a repo with a broken dep chain (e.g. a meta-package
+            # whose provider is missing) fails later at pack time.
+            rprint("[cyan]Verifying pin set with dnf's solver (same as pack)...[/cyan]")
+            download_set, error = resolve_download_set(
+                repos, releasever, basearch, pinned, installroot=installroot
+            )
+            if error is None and download_set:
+                return download_set
+            rprint("[red]Solver rejected the dependency closure:[/red]")
+            if error:
+                for line in error.splitlines():
+                    rprint(f"[yellow]  {line}[/yellow]")
+            if questionary.confirm(
+                "Keep top-level packages only and let pack resolve deps at pack time?",
+                default=True,
+            ).ask():
+                return selected
+            return []
     return selected

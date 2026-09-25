@@ -1,6 +1,9 @@
 """Tests for the wizard repo catalog and pip requirements materialization."""
 
+import io
+
 from syncit.wizard import catalog as rc
+from syncit.wizard import rpm_browser as rb
 from syncit.commands.create import (
     _materialize_pip_requirements,
     _dnf_root_populated,
@@ -67,6 +70,45 @@ def test_supported_distros():
     distros = rc.supported_distros()
     assert "rocky" in distros
     assert "fedora" in distros
+
+
+# ── Solver-verified pin set (dnf download --url --resolve) ───────────────
+
+
+def _fake_dnf_run(stdout="", returncode=0, stderr=""):
+    from subprocess import CompletedProcess
+
+    return CompletedProcess(["dnf"], returncode, stdout, stderr)
+
+
+def test_resolve_download_set_parses_urls(tmp_path, monkeypatch):
+    stdout = "\n".join(
+        [
+            "Updating Subscription Management repositories.",
+            "https://example.com/repo/patroni-4.1.5-1PGDG.rhel9.noarch.rpm",
+            "https://example.com/repo/python3.12-psutil-6.1.1-42PGDG.rhel9.x86_64.rpm",
+        ]
+    )
+    monkeypatch.setattr(rb, "_run", lambda cmd, timeout=900: _fake_dnf_run(stdout=stdout))
+    pkgs, err = rb.resolve_download_set([], "9", "x86_64", ["patroni"])
+    assert err is None
+    assert pkgs == [
+        "patroni-4.1.5-1PGDG.rhel9.noarch",
+        "python3.12-psutil-6.1.1-42PGDG.rhel9.x86_64",
+    ]
+
+
+def test_resolve_download_set_failure_returns_problem(monkeypatch):
+    stderr = (
+        "Error in resolve\n  Problem: conflicting requests\n  - nothing provides python3.12-ydiff"
+    )
+    monkeypatch.setattr(
+        rb, "_run", lambda cmd, timeout=900: _fake_dnf_run(stderr=stderr, returncode=1)
+    )
+    pkgs, err = rb.resolve_download_set([], "9", "x86_64", ["ydiff-1.4.2"])
+    assert pkgs == []
+    assert err is not None
+    assert "nothing provides" in err
 
 
 # ── Base installroot population checks ───────────────────────────────────

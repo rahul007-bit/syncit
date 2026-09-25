@@ -350,11 +350,18 @@ class DnfPlugin(OfflinePlugin):
                 stderr = res.stderr.strip()
                 target_distro = ctx.targets.get("distro", "")
 
-                if target_distro.lower() in ("rhel", "redhat") and (
-                    "No package" in stderr
-                    or "nothing provides" in stderr
-                    or "Cannot download" in stderr
+                if (
+                    target_distro.lower() in ("rhel", "redhat")
+                    and (
+                        "No package" in stderr
+                        or "nothing provides" in stderr
+                        or "Cannot download" in stderr
+                    )
+                    and not repos
                 ):
+                    # Only suggest public mirrors when the task has NO custom
+                    # upstream repos — with custom repos a solver conflict is a
+                    # repo-content problem the Rocky fallback cannot fix.
                     import sys
 
                     if sys.stdout.isatty():

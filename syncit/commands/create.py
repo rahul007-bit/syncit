@@ -404,6 +404,7 @@ def _prompt_apt_dnf_task(
         task["releasever"] = releasever
 
     packages: list[str] = []
+    browsed = False
     if plugin == "dnf":
         live_ok = bool(repos) and shutil.which("dnf") is not None
         if (
@@ -412,6 +413,7 @@ def _prompt_apt_dnf_task(
                 "Browse & select packages live via dnf? (No = enter manually)", default=True
             ).ask()
         ):
+            browsed = True
             installroot = (
                 base_root if (base_root and _dnf_root_populated(Path(base_root))) else None
             )
@@ -434,8 +436,9 @@ def _prompt_apt_dnf_task(
             ).ask()
             != "Enter manually"
         ):
+            browsed = True
             packages = []
-    if not packages:
+    if not packages and not browsed:
         pkg_str = (
             questionary.text(
                 "Packages (comma-separated; name-version[-release] for exact pin):"

@@ -28,6 +28,7 @@ console = Console()
 
 DISTRO_CHOICES = ["Ubuntu", "Debian", "RHEL", "Rocky", "AlmaLinux", "Fedora", "Amazon Linux"]
 APT_DISTROS = {"Ubuntu", "Debian"}
+APT_DISTROS_LOWER = {d.lower() for d in APT_DISTROS}
 _DISTRO_TITLES = {
     "ubuntu": "Ubuntu",
     "debian": "Debian",
@@ -1156,7 +1157,7 @@ def create_cmd(
         # rewritten — only explicitly edited fields change.
         distro_choice = targets.get("distro", "").lower()
         codename = targets.get("codename", "")
-        plugin_type = "apt" if distro_choice in APT_DISTROS else "dnf"
+        plugin_type = "apt" if distro_choice.lower() in APT_DISTROS_LOWER else "dnf"
         arch = targets.get("arch", "amd64")
         base_root_path = ""
         for t in tasks:
@@ -1224,7 +1225,7 @@ def create_cmd(
                     ).ask()
                     if new:
                         distro_choice = new.lower()
-                        plugin_type = "apt" if distro_choice in APT_DISTROS else "dnf"
+                        plugin_type = "apt" if distro_choice.lower() in APT_DISTROS_LOWER else "dnf"
                         if plugin_type == "apt":
                             codename = _require(
                                 wiz_history.prompt_with_history(

@@ -226,3 +226,47 @@ def test_create_cmd_update_mode_preserves_manifest(
     assert loaded["metadata"]["version"] == "2.1.0"
     assert loaded["spec"]["targets"]["distro"] == "ubuntu"
     assert loaded["spec"]["targets"]["codename"] == "noble"
+
+
+@patch("syncit.commands.create.get_catalog")
+@patch("questionary.select")
+@patch("questionary.text")
+@patch("questionary.confirm")
+@patch("questionary.checkbox")
+def test_create_cmd_update_mode_apt_browser_label(
+    mock_checkbox, mock_confirm, mock_text, mock_select, mock_get_catalog, tmp_path: Path
+) -> None:
+    """On an Ubuntu manifest the Browse submenu must offer apt — not dnf — packages."""
+    manifest_path = tmp_path / "bundle.yaml"
+    existing = {
+        "apiVersion": "syncit/v1",
+        "kind": "Bundle",
+        "metadata": {"name": "edge-stack", "version": "2.1.0"},
+        "spec": {
+            "targets": {"distro": "ubuntu", "arch": "amd64", "codename": "noble"},
+            "tasks": [{"name": "tools", "plugin": "apt", "packages": ["htop"]}],
+        },
+    }
+    manifest_path.write_text(json.dumps(existing))
+
+    mock_get_catalog.return_value = {}
+    mock_select.side_effect = [
+        MagicMock(ask=lambda: "Continue with current metadata"),  # metadata menu
+        MagicMock(ask=lambda: "Browse packages & images"),  # What next?
+        MagicMock(ask=lambda: "Back"),  # Browse submenu (capture choices)
+        MagicMock(ask=lambda: "Done"),  # What next?
+        MagicMock(ask=lambda: "Save bundle"),  # Review screen
+        MagicMock(ask=lambda: "none"),  # Run now?
+    ]
+    mock_text.side_effect = [
+        MagicMock(ask=lambda: str(manifest_path)),  # Save path
+    ]
+
+    with patch("syncit.commands.create.Console.print"):
+        create_cmd(manifest_path)
+
+    browse_calls = [c for c in mock_select.call_args_list if "Browse:" in str(c.args)]
+    assert browse_calls, "Browse submenu was never shown"
+    choice_titles = [str(ch) for ch in browse_calls[0].kwargs["choices"]]
+    assert any("apt packages" in t for t in choice_titles)
+    assert not any("dnf packages" in t for t in choice_titles)

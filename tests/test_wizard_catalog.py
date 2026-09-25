@@ -59,6 +59,22 @@ def test_render_repo_fedora_override():
     assert "download.docker.com/linux/fedora/41/" in out["baseurl"]
 
 
+def test_render_entry_repos_pgdg_adds_common_and_versioned():
+    entry = next(r for r in rc.load_repos("rocky") if r["id"] == "pgdg")
+    out = rc.render_entry_repos(
+        entry,
+        "rocky",
+        releasever="9",
+        basearch="x86_64",
+        values={"pgdg_ver": "17", "pgdg_minor": "9.6"},
+    )
+    names = {r["name"] for r in out}
+    assert names == {"pgdg-common", "pgdg17"}
+    urls = {r["baseurl"] for r in out}
+    assert "https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-9.6-x86_64" in urls
+    assert "https://download.postgresql.org/pub/repos/yum/17/redhat/rhel-9.6-x86_64" in urls
+
+
 def test_substitute_vars_brace_and_dollar():
     assert (
         rc.substitute_vars("rhel-{minor}-$basearch", {"minor": "9.6", "basearch": "x86_64"})

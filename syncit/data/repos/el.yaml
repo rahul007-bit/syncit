@@ -44,19 +44,24 @@
 
 - id: pgdg
   label: PostgreSQL PGDG
-  description: Official PostgreSQL (14-18) RPMs from the PostgreSQL Global Development Group
-  distros: [rhel, rocky, almalinux, centos, fedora]
+  description: Official PostgreSQL RPMs — adds the common repo plus the versioned server repo
+  distros: [rhel, rocky, almalinux, centos]
   vars:
+    pgdg_ver:
+      prompt: PostgreSQL major version (14-18)
+      default: "17"
     pgdg_minor:
       prompt: RHEL minor release used by PGDG mirrors (e.g. 9.6)
       default: "9.6"
-  repo:
-    baseurl: https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-{pgdg_minor}-$basearch
-    gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
-    gpgcheck: true
-  repo_overrides:
-    fedora:
-      baseurl: https://download.postgresql.org/pub/repos/yum/common/fedora/fedora-$releasever-$basearch
+  repos:
+    - name: pgdg-common
+      baseurl: https://download.postgresql.org/pub/repos/yum/common/redhat/rhel-{pgdg_minor}-$basearch
+      gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
+      gpgcheck: true
+    - name: pgdg{pgdg_ver}
+      baseurl: https://download.postgresql.org/pub/repos/yum/{pgdg_ver}/redhat/rhel-{pgdg_minor}-$basearch
+      gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
+      gpgcheck: true
 
 - id: grafana
   label: Grafana

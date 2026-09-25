@@ -48,7 +48,9 @@ def load_repos(distro_id: str) -> list[dict[str, Any]]:
 
     result: list[dict[str, Any]] = []
     for entry in entries:
-        if not isinstance(entry, dict) or "id" not in entry or "repo" not in entry:
+        if not isinstance(entry, dict) or "id" not in entry:
+            continue
+        if "repo" not in entry and "repos" not in entry:
             continue
         if distro_id not in entry.get("distros", []):
             continue
@@ -97,3 +99,29 @@ def render_repo(
     }
     rendered = {k: substitute_vars(v, subs) if isinstance(v, str) else v for k, v in repo.items()}
     return rendered
+
+
+def render_entry_repos(
+    entry: dict[str, Any],
+    distro_id: str,
+    releasever: str = "",
+    basearch: str = "x86_64",
+    values: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Resolve ALL repo configs an entry contributes for a distro.
+    Entries may define either a single `repo` or a list under `repos`
+    (e.g. PGDG ships pgdg-common + one repo per PostgreSQL major version).
+    Each repo gets a name from its own `name` field if present, else the entry id.
+    """
+    if entry.get("repos"):
+        repos_cfgs = entry["repos"]
+    else:
+        repos_cfgs = [entry["repo"]]
+    out: list[dict[str, Any]] = []
+    for cfg in repos_cfgs:
+        pseudo = {**entry, "repo": cfg}
+        rendered = render_repo(pseudo, distro_id, releasever, basearch, values)
+        rendered.setdefault("name", entry["id"])
+        out.append(rendered)
+    return out

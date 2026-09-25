@@ -347,16 +347,19 @@ def _prompt_upstream_repos(
                     ).ask()
                     values[var_name] = (ans or spec.get("default", "")).strip()
                 basearch = repo_catalog.ARCH_TO_BASEARCH.get(arch, arch or "x86_64")
-                rendered = repo_catalog.render_repo(
+                rendered_list = repo_catalog.render_entry_repos(
                     entry,
                     distro_id=distro_id,
                     releasever=releasever,
                     basearch=basearch,
                     values=values,
                 )
-                repos.append({"name": entry["id"], **rendered})
-                rprint(f"[green]Repo added:[/] {entry['label']}")
-                rprint(f"[dim]  {rendered.get('baseurl', '')}[/dim]")
+                repos.extend(rendered_list)
+                rprint(f"[green]Repo(s) added:[/] {entry['label']} ({len(rendered_list)})")
+                for rendered in rendered_list:
+                    rprint(
+                        f"[dim]  {rendered.get('name', '')}: {rendered.get('baseurl', '')}[/dim]"
+                    )
         else:  # Add custom repo
             name = questionary.text("Repo name (short key):").ask()
             if not name:

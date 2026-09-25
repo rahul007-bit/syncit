@@ -24,12 +24,21 @@
 
 - id: pgdg
   label: PostgreSQL PGDG
-  description: Official PostgreSQL (14-18) RPMs from the PostgreSQL Global Development Group
-  distros: [rhel, rocky, almalinux, centos, fedora]
-  repo:
-    baseurl: https://download.postgresql.org/pub/repos/yum/common/fedora/fedora-$releasever-$basearch
-    gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
-    gpgcheck: true
+  description: Official PostgreSQL RPMs — adds the common repo plus the versioned server repo
+  distros: [fedora]
+  vars:
+    pgdg_ver:
+      prompt: PostgreSQL major version (14-18)
+      default: "17"
+  repos:
+    - name: pgdg-common
+      baseurl: https://download.postgresql.org/pub/repos/yum/common/fedora/fedora-$releasever-$basearch
+      gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
+      gpgcheck: true
+    - name: pgdg{pgdg_ver}
+      baseurl: https://download.postgresql.org/pub/repos/yum/{pgdg_ver}/fedora/fedora-$releasever-$basearch
+      gpgkey: https://download.postgresql.org/pub/repos/yum/keys/PGDG-RPM-GPG-KEY-RHEL
+      gpgcheck: true
 
 - id: grafana
   label: Grafana

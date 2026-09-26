@@ -533,7 +533,7 @@ def _edit_task(task: dict, distro_id: str, releasever: str, arch: str, base_root
             if pkg_str is not None:
                 task["packages"] = [p.strip() for p in pkg_str.split(",") if p.strip()]
         elif field == "requirements":
-            new = wiz_history.prompt_with_history(
+            new = wiz_history.prompt_text_history(
                 "requirements_path", "requirements.txt path (blank to clear):"
             )
             if new is None:
@@ -917,7 +917,7 @@ def _prompt_pip_task(task_name: str) -> dict | None:
     from syncit.wizard import history as wiz_history
 
     task: dict = {"name": task_name, "plugin": "pip"}
-    req_file = wiz_history.prompt_with_history(
+    req_file = wiz_history.prompt_text_history(
         "requirements_path", "requirements.txt path (blank to list packages inline):"
     )
     if req_file is None:
@@ -952,6 +952,8 @@ def _prompt_pip_task(task_name: str) -> dict | None:
 
 
 def _prompt_oci_task(task_name: str) -> dict | None:
+    from syncit.wizard import history as wiz_history
+
     task: dict = {"name": task_name, "plugin": "oci_image"}
     images: list[str] = []
     browsed = False
@@ -971,10 +973,13 @@ def _prompt_oci_task(task_name: str) -> dict | None:
         images = browsed_imgs
     if not images and not browsed:
         rprint(
-            "[dim]Enter image references one per line. Leave blank and press Enter to stop.[/dim]"
+            "[dim]Enter image references one per line (↑/↓ for recent refs). "
+            "Leave blank and press Enter to stop.[/dim]"
         )
         while True:
-            img = questionary.text("Image (blank to stop):").ask()
+            img = wiz_history.prompt_text_history("image_ref", "Image (blank to stop):")
+            if img is None:
+                return None
             if not img:
                 break
             images.append(img)
@@ -1202,13 +1207,13 @@ def create_cmd(
                 if field is None or field == "back":
                     break
                 if field == "name":
-                    new = wiz_history.prompt_with_history(
+                    new = wiz_history.prompt_text_history(
                         "bundle_name", "Bundle name:", default=meta.get("name", "")
                     )
                     if new:
                         meta["name"] = new
                 elif field == "version":
-                    new = wiz_history.prompt_with_history(
+                    new = wiz_history.prompt_text_history(
                         "bundle_version", "Version:", default=meta.get("version", "1.0.0")
                     )
                     if new:
@@ -1224,7 +1229,7 @@ def create_cmd(
                         plugin_type = "apt" if distro_choice.lower() in APT_DISTROS_LOWER else "dnf"
                         if plugin_type == "apt":
                             codename = _require(
-                                wiz_history.prompt_with_history(
+                                wiz_history.prompt_text_history(
                                     "codename",
                                     "Codename:",
                                     default=codename or _detect_codename() or "noble",
@@ -1233,7 +1238,7 @@ def create_cmd(
                             )
                         else:
                             codename = _require(
-                                wiz_history.prompt_with_history(
+                                wiz_history.prompt_text_history(
                                     "releasever",
                                     "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
                                     default=codename or _detect_releasever() or "9",
@@ -1251,7 +1256,7 @@ def create_cmd(
                 elif field == "codename":
                     if plugin_type == "apt":
                         codename = _require(
-                            wiz_history.prompt_with_history(
+                            wiz_history.prompt_text_history(
                                 "codename",
                                 "Codename:",
                                 default=codename or _detect_codename() or "noble",
@@ -1260,7 +1265,7 @@ def create_cmd(
                         )
                     else:
                         codename = _require(
-                            wiz_history.prompt_with_history(
+                            wiz_history.prompt_text_history(
                                 "releasever",
                                 "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
                                 default=codename or _detect_releasever() or "9",
@@ -1275,7 +1280,7 @@ def create_cmd(
                         ).ask()
                     )
                     if enable_base:
-                        new = wiz_history.prompt_with_history(
+                        new = wiz_history.prompt_text_history(
                             "base_root",
                             "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):",
                             default=base_root_path or "/",
@@ -1299,14 +1304,14 @@ def create_cmd(
         # ── Fresh-create metadata prompts ─────────────────────────────────
         rprint("\n[bold]Bundle Metadata[/bold]")
 
-        bundle_name = wiz_history.prompt_with_history(
+        bundle_name = wiz_history.prompt_text_history(
             "bundle_name", "Bundle name:", default=meta.get("name", "")
         )
         if not bundle_name:
             raise typer.Exit()
 
         version = _require(
-            wiz_history.prompt_with_history(
+            wiz_history.prompt_text_history(
                 "bundle_version", "Version:", default=meta.get("version", "1.0.0")
             ),
             "version",
@@ -1350,7 +1355,7 @@ def create_cmd(
                     rprint(h)
 
             codename = _require(
-                wiz_history.prompt_with_history("codename", "Codename:", default=default_codename),
+                wiz_history.prompt_text_history("codename", "Codename:", default=default_codename),
                 "codename",
             )
             plugin_type = "apt"
@@ -1387,7 +1392,7 @@ def create_cmd(
                     rprint(h)
 
             codename = _require(
-                wiz_history.prompt_with_history(
+                wiz_history.prompt_text_history(
                     "releasever",
                     "Release version (e.g. 9 for Rocky 9, 2023 for Amazon Linux):",
                     default=default_releasever,
@@ -1412,7 +1417,7 @@ def create_cmd(
                     existing_base = t["base_installroot"]
                     break
             picked = (
-                wiz_history.prompt_with_history(
+                wiz_history.prompt_text_history(
                     "base_root",
                     "Base installroot path (e.g. / or /opt/syncit/rhel9-base-root):",
                     default=existing_base,
@@ -1595,7 +1600,7 @@ def create_cmd(
 
     rprint("\n")
     default_save = str(manifest_file) if manifest_file else "bundle.yaml"
-    save_path = questionary.text("Save to:", default=default_save).ask()
+    save_path = wiz_history.prompt_text_history("save_path", "Save to:", default=default_save)
     if not save_path:
         raise typer.Exit()
 

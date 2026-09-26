@@ -135,24 +135,63 @@ def test_prompt_search_records_new_term():
     assert history.recent_searches("apt") == ["nginx"]
 
 
-def test_prompt_search_select_recent():
+def test_prompt_search_passes_arrow_history():
     history.record_search("dnf", "podman")
+    seen = {}
 
-    def fake_select(message, choices, use_jk_keys=False, **kwargs):
-        assert use_jk_keys is False
+    def fake_text(message, history=None, **kwargs):
+        seen["history"] = history
         return type("Q", (), {"ask": lambda self: "podman"})()
 
-    with patch.object(history.questionary, "select", fake_select):
+    with patch.object(history.questionary, "text", fake_text):
         term = history.prompt_search("dnf", "Search:")
     assert term == "podman"
+    assert seen["history"] is not None
+    assert "podman" in list(seen["history"].get_strings())
 
 
 def test_prompt_search_cancel_returns_none():
-    history.record_search("apt", "kubeadm")
     with patch.object(
-        history.questionary, "select", lambda *a, **k: type("Q", (), {"ask": lambda self: None})()
+        history.questionary, "text", lambda *a, **k: type("Q", (), {"ask": lambda self: None})()
     ):
         assert history.prompt_search("apt", "Search:") is None
+
+
+def test_prompt_text_history_roundtrip():
+    history.record_value("bundle_name", "k8s")
+    seen = {}
+
+    def fake_text(message, default="", history=None, **kwargs):
+        seen["message"] = message
+        seen["default"] = default
+        seen["history"] = history
+        return type("Q", (), {"ask": lambda self: "edge"})()
+
+    with patch.object(history.questionary, "text", fake_text):
+        result = history.prompt_text_history("bundle_name", "Bundle name:", default="k8s")
+    assert result == "edge"
+    assert seen["message"] == "Bundle name:"
+    assert seen["default"] == "k8s"
+    assert "k8s" in list(seen["history"].get_strings())
+    assert history.recent_values("bundle_name") == ["edge", "k8s"]
+
+
+def test_prompt_text_history_empty_history_no_crash():
+    with patch.object(
+        history.questionary,
+        "text",
+        lambda *a, **k: type("Q", (), {"ask": lambda self: "fresh"})(),
+    ):
+        assert history.prompt_text_history("bundle_name", "Bundle name:") == "fresh"
+
+
+def test_prompt_text_history_blank_not_recorded():
+    with patch.object(
+        history.questionary, "text", lambda *a, **k: type("Q", (), {"ask": lambda self: ""})()
+    ):
+        result = history.prompt_text_history("bundle_name", "Bundle name:")
+    assert result == ""
+    assert history.recent_values("bundle_name") == []
 
 
 def test_on_disk_format():

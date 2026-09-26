@@ -24,6 +24,7 @@ import tempfile
 from pathlib import Path
 
 import questionary
+from prompt_toolkit.history import InMemoryHistory
 
 MAX_HISTORY = 10
 NEW_VALUE = "Enter a new value…"
@@ -211,36 +212,41 @@ def prompt_with_history(
     return picked
 
 
+def prompt_text_history(
+    field: str, message: str, default: str = "", history: list[str] | None = None
+) -> str | None:
+    """
+    Text prompt with readline-style history: press ↑/↓ to cycle through
+    previously used values (like shell history). The answer is recorded
+    for that field. Returns None on Ctrl+C.
+    """
+    recents = history if history is not None else recent_values(field)
+    pk = InMemoryHistory()
+    for v in recents:  # newest first — ↑ cycles most-recent → oldest
+        pk.append_string(v)
+    value = questionary.text(message, default=default, history=pk).ask()
+    if value is not None and value.strip():
+        record_value(field, value)
+    return value
+
+
 def prompt_search(
     browser: str, message: str, history: list[str] | None = None, finish: str | None = None
 ) -> str | None:
     """
-    Search prompt with per-browser history: pick a previous term, enter a new
-    search, or pick the `finish` option (returns "" — callers treat blank as
-    "done with this round"). Returns None on Ctrl+C.
+    Search prompt with readline-style ↑/↓ history per browser. Blank Enter
+    finishes the round (""); Ctrl+C returns None. `finish` is kept for
+    backwards compatibility of call sites (text prompts finish on blank).
     """
     recents = history if history is not None else recent_searches(browser)
     recents = [r for r in recents if r]
-    if not recents:
-        term = questionary.text(message).ask()
-        if term is not None and term.strip():
-            record_search(browser, term)
-        return term
-    choices = [questionary.Choice(title=f"{r}  [recent]", value=r) for r in recents[:MAX_HISTORY]]
-    choices.append(questionary.Choice(title="New search…", value="__new_search__"))
-    if finish:
-        choices.append(questionary.Choice(title=finish, value="__finish__"))
-    picked = questionary.select(message, choices=choices, use_jk_keys=False).ask()
-    if picked is None:
-        return None
-    if picked == "__new_search__":
-        term = questionary.text(message).ask()
-        if term is not None and term.strip():
-            record_search(browser, term)
-        return term
-    if picked == "__finish__":
-        return ""
-    return picked
+    pk = InMemoryHistory()
+    for v in recents[:MAX_HISTORY]:
+        pk.append_string(v)
+    term = questionary.text(message, history=pk).ask()
+    if term is not None and term.strip():
+        record_search(browser, term)
+    return term
 
 
 def clear_history(field: str | None = None) -> bool:

@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
-import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -21,6 +19,8 @@ from typing import Any
 import questionary
 from rich import print as rprint
 from rich.markup import escape
+
+from syncit.plugins.pip import pip_command_candidates
 
 # "name", "name[extra1,extra2]" — extras are preserved for pip resolution
 _SPEC_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*$")
@@ -32,30 +32,6 @@ def _split_extras(spec: str) -> tuple[str, str]:
     if not m:
         return spec.strip(), ""
     return m.group(1), (m.group(2) or "")
-
-
-def _pip_candidates() -> list[list[str]]:
-    """Ordered pip command prefixes to try.
-
-    uv-created virtualenvs intentionally ship without pip, so `python -m pip`
-    fails with 'No module named pip'. Fall back to a uv-provisioned pip (always
-    recent enough for --report), then to system pip/pip3 and other interpreters.
-    """
-    cands: list[list[str]] = [[sys.executable, "-m", "pip"]]
-    uv = shutil.which("uv")
-    if uv:
-        cands.append([uv, "run", "--quiet", "--with", "pip", "python", "-m", "pip"])
-    for exe in ("pip3", "pip"):
-        path = shutil.which(exe)
-        if path:
-            cands.append([path])
-    seen = {sys.executable}
-    for exe in ("python3", "python"):
-        path = shutil.which(exe)
-        if path and path not in seen:
-            seen.add(path)
-            cands.append([path, "-m", "pip"])
-    return cands
 
 
 def fetch_package(name: str, timeout: int = 30) -> dict[str, Any] | None:
@@ -111,7 +87,7 @@ def resolve_pip_deps(spec: str, python_version: str = "") -> list[dict[str, str]
     with tempfile.TemporaryDirectory(prefix="syncit-pypi-") as tmp:
         report = Path(tmp) / "report.json"
         resolved = False
-        for pip_prefix in _pip_candidates():
+        for pip_prefix in pip_command_candidates():
             for variant in variants:
                 report.unlink(missing_ok=True)
                 cmd = [

@@ -23,18 +23,50 @@ def _run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
 
 
-def _pip_executable() -> list[str]:
-    # Always prefer system pip3/pip — never use sys.executable
-    for candidate in ["pip3", "pip"]:
-        if shutil.which(candidate):
-            return [candidate]
-    # Last resort: find system python3 (not sys.executable) and use its -m pip
+def pip_command_candidates() -> list[list[str]]:
+    """Ordered pip command prefixes to try.
+
+    Prefer system pip3/pip, then a uv-provisioned pip (uv venvs ship without
+    pip), then system python3, and finally the current interpreter. Callers
+    probe each until one runs.
+    """
+    cands: list[list[str]] = []
+    for candidate in ("pip3", "pip"):
+        path = shutil.which(candidate)
+        if path:
+            cands.append([path])
+    uv = shutil.which("uv")
+    if uv:
+        cands.append([uv, "run", "--quiet", "--with", "pip", "python", "-m", "pip"])
     python3 = shutil.which("python3")
     if python3:
-        result = subprocess.run([python3, "-m", "pip", "--version"], capture_output=True)
+        cands.append([python3, "-m", "pip"])
+    cands.append([sys.executable, "-m", "pip"])
+    return cands
+
+
+_pip_cmd_cache: list[str] | None = None
+
+
+def _pip_executable() -> list[str]:
+    """Return the first pip command prefix that actually runs (cached)."""
+    global _pip_cmd_cache
+    if _pip_cmd_cache is not None:
+        return _pip_cmd_cache
+    for cmd in pip_command_candidates():
+        try:
+            result = subprocess.run(
+                [*cmd, "--version"], capture_output=True, text=True, timeout=120
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
         if result.returncode == 0:
-            return [python3, "-m", "pip"]
-    raise RuntimeError("pip not found — install pip3: sudo apt-get install python3-pip")
+            _pip_cmd_cache = cmd
+            return cmd
+    raise RuntimeError(
+        "pip not found — install pip (dnf install python3-pip / apt-get install python3-pip) "
+        "or run syncit via 'uv run'"
+    )
 
 
 class PipPlugin(OfflinePlugin):

@@ -173,26 +173,23 @@ class PipPlugin(OfflinePlugin):
         result = do_run(cmd)
 
         if result.returncode != 0:
-            # Retry without --only-binary, warn user
+            # Some pinned package has no wheel for the target (e.g. sdist-only).
+            # Retry allowing source distributions BUT keep --python-version so
+            # wheels stay compatible with the target interpreter. pip only
+            # permits --python-version without --only-binary when --no-deps is
+            # set, so the requirements file must list the full pinned closure
+            # (the wizard generates exactly that). Dropping --python-version
+            # here would download wheels for the build host's interpreter
+            # (e.g. cp314) that cannot install on the target.
             print(
-                "[pip] WARNING: --only-binary=:all: failed — retrying without it. "
-                "Source distributions will be compiled on the offline VM.",
+                "[pip] WARNING: binary-only download failed — retrying with source "
+                "distributions allowed for the target Python. The requirements file "
+                "must list the full dependency closure.",
                 file=sys.stderr,
             )
-            # When removing --only-binary=:all:, pip also requires removing --python-version
-            # unless --no-deps is set.
-            cmd_retry = []
-            skip_next = False
-            for c in cmd:
-                if skip_next:
-                    skip_next = False
-                    continue
-                if c == "--only-binary=:all:":
-                    continue
-                if c == "--python-version":
-                    skip_next = True
-                    continue
-                cmd_retry.append(c)
+            cmd_retry = [c for c in cmd if c != "--only-binary=:all:"]
+            pv_idx = cmd_retry.index("--python-version")
+            cmd_retry.insert(pv_idx + 2, "--no-deps")
             result = do_run(cmd_retry)
             if result.returncode != 0:
                 return PluginResult(

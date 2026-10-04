@@ -119,6 +119,31 @@ class TestPipPack:
         assert result.success is True
         assert call_count["n"] == 2  # first attempt + retry
 
+    def test_pack_retry_keeps_target_python_version(
+        self, plugin: PipPlugin, pack_ctx: PackContext
+    ) -> None:
+        """The sdist fallback must not download host-version wheels (e.g. cp314)."""
+        fail = MagicMock(returncode=1, stdout="", stderr="no binary")
+        ok = MagicMock(returncode=0, stdout="", stderr="")
+        retry_cmd: list[str] = []
+
+        def side_effect(cmd, **kwargs):
+            if "--only-binary=:all:" in cmd:
+                return fail
+            retry_cmd.extend(cmd)
+            return ok
+
+        with patch("syncit.plugins.pip.subprocess.run", side_effect=side_effect):
+            result = plugin.pack(
+                {"requirements": "requirements.txt", "python_version": "3.11"}, pack_ctx
+            )
+
+        assert result.success is True
+        assert "--python-version" in retry_cmd
+        assert retry_cmd[retry_cmd.index("--python-version") + 1] == "3.11"
+        assert "--no-deps" in retry_cmd
+        assert "--only-binary=:all:" not in retry_cmd
+
     def test_pyproject_not_supported_returns_failure(
         self, plugin: PipPlugin, pack_ctx: PackContext
     ) -> None:

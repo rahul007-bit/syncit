@@ -17,8 +17,23 @@ HOST_REPO_DIR = Path("/etc/yum.repos.d")
 HOST_APT_SOURCES = Path("/etc/apt/sources.list")
 HOST_APT_SOURCES_DIR = Path("/etc/apt/sources.list.d")
 
-# Sections matching these suffixes are not useful for offline bundling
-_SKIP_SUFFIXES = ("-source", "-debuginfo", "-debug", "-srpm", "-modular")
+# Section ids containing any of these are not useful for offline bundling.
+# Substring (not suffix) match so variants like '-source-rpms' and
+# '-debug-rpms' in redhat.repo are filtered too.
+_SKIP_MARKERS = ("-source", "-debuginfo", "-debug", "-srpm", "-modular")
+
+# redhat.repo ships a definition for every repo in the subscription's content
+# set (600+), almost all enabled=0. Only surface disabled repos that commonly
+# provide build/runtime dependencies, so the picker stays usable.
+_DISABLED_ALLOW = ("codeready-builder", "powertools", "-crb", "epel")
+
+
+def _is_skippable(section: str) -> bool:
+    return any(marker in section for marker in _SKIP_MARKERS)
+
+
+def _disabled_relevant(section: str) -> bool:
+    return any(pat in section for pat in _DISABLED_ALLOW)
 
 
 def _first_line(value: str | None) -> str:
@@ -37,10 +52,12 @@ def load_host_repos(
 ) -> list[dict[str, Any]]:
     """Parse repos from *.repo files into catalog-shaped entries.
 
-    When `include_disabled` is set, disabled sections are returned too (flagged
-    `disabled=True`). This surfaces opt-in repos such as RHEL's CodeReady Linux
-    Builder (CRB), which ships `enabled=0` but is required by many -devel
-    packages (e.g. perl(IPC::Run) for postgresql16-devel).
+    When `include_disabled` is set, a curated subset of disabled sections is
+    returned too (flagged `disabled=True`): repos such as RHEL's CodeReady
+    Linux Builder (CRB), which ship `enabled=0` but are required by many -devel
+    packages (e.g. perl(IPC::Run) for postgresql16-devel). Other disabled
+    definitions (the 600+ product repos in redhat.repo) are ignored to keep the
+    picker usable.
     """
     d = repo_dir if repo_dir is not None else HOST_REPO_DIR
     if not d.is_dir():
@@ -57,12 +74,14 @@ def load_host_repos(
         for section in parser.sections():
             if section in seen:
                 continue
-            if any(section.endswith(sfx) for sfx in _SKIP_SUFFIXES):
+            if _is_skippable(section):
                 continue
             data = parser[section]
             enabled = _is_enabled(data)
-            if not enabled and not include_disabled:
-                continue
+            if not enabled:
+                # Only surface disabled repos that are actually useful opt-ins
+                if not include_disabled or not _disabled_relevant(section):
+                    continue
             baseurl = _first_line(data.get("baseurl"))
             mirror = _first_line(data.get("mirrorlist") or data.get("metalink"))
             url = baseurl or mirror

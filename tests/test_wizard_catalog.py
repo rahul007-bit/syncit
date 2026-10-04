@@ -276,6 +276,26 @@ def test_load_host_repos_parses_repo_files(tmp_path):
     assert entries[0]["label"] == "[host] my-el9"
 
 
+def test_load_host_repos_include_disabled_curates_crb(tmp_path):
+    from syncit.wizard import host_repos as hr
+
+    (tmp_path / "redhat.repo").write_text(
+        "[codeready-builder-for-rhel-9-x86_64-rpms]\n"
+        "name=CRB\nbaseurl=https://cdn.redhat.com/crb\nenabled=0\n"
+        "\n"
+        "[codeready-builder-for-rhel-9-x86_64-source-rpms]\n"
+        "name=CRB source\nbaseurl=https://cdn.redhat.com/crb-src\nenabled=0\n"
+        "\n"
+        "[rhocp-4.16-for-rhel-9-x86_64-rpms]\n"
+        "name=OCP\nbaseurl=https://cdn.redhat.com/ocp\nenabled=0\n"
+    )
+    entries = hr.load_host_repos(tmp_path, include_disabled=True)
+    ids = [e["id"] for e in entries]
+    # only the CRB RPM repo — source variant and unrelated product repos filtered
+    assert ids == ["codeready-builder-for-rhel-9-x86_64-rpms"]
+    assert entries[0]["disabled"] is True
+
+
 # ── Apt browser helpers ──────────────────────────────────────────────────
 
 

@@ -925,6 +925,8 @@ def _prompt_pip_task(task_name: str) -> dict | None:
     )
     if req_file is None:
         return None
+    # Ask the target interpreter before browsing so dependency resolution uses it.
+    task["python_version"] = questionary.text("Python version:", default="3.11").ask() or "3.11"
     if req_file:
         task["requirements"] = req_file
     else:
@@ -942,7 +944,7 @@ def _prompt_pip_task(task_name: str) -> dict | None:
         ):
             from syncit.wizard.pypi_browser import browse_pypi_packages
 
-            browsed_pkgs = browse_pypi_packages()
+            browsed_pkgs = browse_pypi_packages(python_version=task["python_version"])
             if browsed_pkgs is None:
                 return None
             packages = browsed_pkgs
@@ -950,7 +952,6 @@ def _prompt_pip_task(task_name: str) -> dict | None:
             pkg_str = questionary.text("Python packages (comma-separated):").ask() or ""
             packages = [p.strip() for p in pkg_str.split(",") if p.strip()]
         task["packages"] = packages
-    task["python_version"] = questionary.text("Python version:", default="3.11").ask() or "3.11"
     return task
 
 

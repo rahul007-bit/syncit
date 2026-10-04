@@ -9,6 +9,8 @@ into a generated requirements.txt.
 from __future__ import annotations
 
 import json
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +20,42 @@ from typing import Any
 
 import questionary
 from rich import print as rprint
+from rich.markup import escape
+
+# "name", "name[extra1,extra2]" — extras are preserved for pip resolution
+_SPEC_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*$")
+
+
+def _split_extras(spec: str) -> tuple[str, str]:
+    """'patroni[etcd3]' -> ('patroni', '[etcd3]')."""
+    m = _SPEC_RE.match(spec)
+    if not m:
+        return spec.strip(), ""
+    return m.group(1), (m.group(2) or "")
+
+
+def _pip_candidates() -> list[list[str]]:
+    """Ordered pip command prefixes to try.
+
+    uv-created virtualenvs intentionally ship without pip, so `python -m pip`
+    fails with 'No module named pip'. Fall back to a uv-provisioned pip (always
+    recent enough for --report), then to system pip/pip3 and other interpreters.
+    """
+    cands: list[list[str]] = [[sys.executable, "-m", "pip"]]
+    uv = shutil.which("uv")
+    if uv:
+        cands.append([uv, "run", "--quiet", "--with", "pip", "python", "-m", "pip"])
+    for exe in ("pip3", "pip"):
+        path = shutil.which(exe)
+        if path:
+            cands.append([path])
+    seen = {sys.executable}
+    for exe in ("python3", "python"):
+        path = shutil.which(exe)
+        if path and path not in seen:
+            seen.add(path)
+            cands.append([path, "-m", "pip"])
+    return cands
 
 
 def fetch_package(name: str, timeout: int = 30) -> dict[str, Any] | None:
@@ -64,37 +102,48 @@ def resolve_pip_deps(spec: str, python_version: str = "") -> list[dict[str, str]
     """
     from pathlib import Path
 
-    base_cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "--dry-run",
-        "--quiet",
-        "--ignore-installed",
-    ]
     variants: list[list[str]] = [[]]
     if python_version:
         # Resolving for a different interpreter requires binary-only wheels
         variants.insert(0, ["--python-version", python_version, "--only-binary=:all:"])
 
+    last_err = ""
     with tempfile.TemporaryDirectory(prefix="syncit-pypi-") as tmp:
         report = Path(tmp) / "report.json"
-        res = None
-        for variant in variants:
-            cmd = [*base_cmd, *variant, "--report", str(report), spec]
-            try:
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-            except subprocess.TimeoutExpired:
-                rprint("[yellow]pip resolution timed out.[/yellow]")
-                return []
-            if res.returncode == 0 and report.exists():
+        resolved = False
+        for pip_prefix in _pip_candidates():
+            for variant in variants:
+                report.unlink(missing_ok=True)
+                cmd = [
+                    *pip_prefix,
+                    "install",
+                    "--dry-run",
+                    "--quiet",
+                    "--ignore-installed",
+                    *variant,
+                    "--report",
+                    str(report),
+                    spec,
+                ]
+                try:
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                except subprocess.TimeoutExpired:
+                    rprint("[yellow]pip resolution timed out.[/yellow]")
+                    return []
+                except OSError as e:
+                    last_err = str(e)
+                    continue
+                if res.returncode == 0 and report.exists():
+                    resolved = True
+                    break
+                last_err = ((res.stderr or "") or (res.stdout or "")).strip()
+            if resolved:
                 break
-        if res is None or res.returncode != 0 or not report.exists():
-            last = ((res.stderr if res else "") or (res.stdout if res else "")).strip().splitlines()
+        if not resolved:
             rprint("[yellow]pip dependency resolution failed:[/yellow]")
-            for line in last[-4:]:
-                rprint(f"[dim]  {line}[/dim]")
+            for line in last_err.splitlines()[-4:]:
+                rprint(f"[dim]  {escape(line)}[/dim]")
+            rprint("[dim]  No usable pip found — install pip, or run syncit via 'uv run'.[/dim]")
             return []
         data = json.loads(report.read_text())
         out: list[dict[str, str]] = []
@@ -107,10 +156,13 @@ def resolve_pip_deps(spec: str, python_version: str = "") -> list[dict[str, str]
         return out
 
 
-def browse_pypi_packages() -> list[str] | None:
+def browse_pypi_packages(python_version: str = "") -> list[str] | None:
     """
     Interactive PyPI search/select loop. Returns a list of pinned
     'name==version' strings, or None when the user presses Ctrl+C.
+
+    `python_version`: target interpreter for dependency resolution (e.g. "3.9"
+    on RHEL 9); when set, pip resolves with --python-version/--only-binary.
     """
     selected: list[str] = []
     from syncit.wizard.history import prompt_search
@@ -121,13 +173,15 @@ def browse_pypi_packages() -> list[str] | None:
             return None
         if not name or not name.strip():
             break
-        name = name.strip()
-        data = fetch_package(name)
+        base_name, extras = _split_extras(name.strip())
+        data = fetch_package(base_name)
         if data is None:
-            rprint(f"[yellow]'{name}' not found on PyPI — check the spelling.[/yellow]")
+            rprint(
+                f"[yellow]'{escape(name.strip())}' not found on PyPI — check the spelling.[/yellow]"
+            )
             continue
         if data["summary"]:
-            rprint(f"[dim]  {data['name']}: {data['summary'][:80]}[/dim]")
+            rprint(f"[dim]  {escape(data['name'])}: {escape(data['summary'][:80])}[/dim]")
         versions = data["versions"][:40]
         version = questionary.select(
             f"Version for {data['name']}:",
@@ -135,12 +189,12 @@ def browse_pypi_packages() -> list[str] | None:
         ).ask()
         if not version:
             continue
-        pin = f"{data['name']}=={version}"
+        pin = f"{data['name']}{extras}=={version}"
         if pin in selected:
             continue
 
         rprint("[cyan]Resolving dependency closure...[/cyan]")
-        deps = resolve_pip_deps(pin)
+        deps = resolve_pip_deps(pin, python_version=python_version)
         if deps:
             rprint(f"[cyan]Full closure: {len(deps)} package(s)[/cyan]")
             for d in deps[:25]:
@@ -158,6 +212,6 @@ def browse_pypi_packages() -> list[str] | None:
             selected.extend(f"{d['name']}=={d['version']}" for d in deps)
         else:
             selected.append(pin)
-        rprint(f"[green]Added:[/] {pin}")
+        rprint(f"[green]Added:[/] {escape(pin)}")
 
     return list(dict.fromkeys(selected))

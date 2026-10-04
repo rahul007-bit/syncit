@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from rich import print as rprint
 from rich.console import Console
 
 from syncit.plugins.base import (
@@ -53,8 +54,8 @@ def sync_subscription_to_installroot(installroot: Path | str, verbose: bool = Fa
                 shutil.copytree(str(host_path), str(ir_path), dirs_exist_ok=True)
     except Exception as e:
         if verbose:
-            print(
-                f"    [dnf] [dim]Note: Could not copy some host entitlements to installroot: {e}[/dim]"
+            rprint(
+                rf"    \[dnf] [dim]Note: Could not copy some host entitlements to installroot: {e}[/dim]"
             )
 
 
@@ -337,11 +338,15 @@ class DnfPlugin(OfflinePlugin):
                             filename = line.split("/")[-1].split("?")[0]
                             cached_file = rpm_cache_dir / filename
                             if cached_file.exists():
-                                # Layer 2: RPM integrity check (rpm -K / rpm -qp)
+                                # Layer 2: RPM integrity check (digest only).
+                                # --nosignature is required: `rpm -K` otherwise
+                                # fails with NOKEY for packages whose signing key
+                                # isn't imported (e.g. PGDG/EPEL), deleting valid
+                                # files and forcing a re-download every run.
                                 is_valid = False
                                 try:
                                     check_res = subprocess.run(
-                                        ["rpm", "-K", "--quiet", str(cached_file)],
+                                        ["rpm", "-K", "--nosignature", "--quiet", str(cached_file)],
                                         capture_output=True,
                                     )
                                     if check_res.returncode == 0:
@@ -352,13 +357,13 @@ class DnfPlugin(OfflinePlugin):
 
                                 if is_valid:
                                     if ctx.verbose and cached_count < 10:
-                                        print(f"    [dnf] [dim]Using cached: {filename}[/dim]")
+                                        rprint(rf"    \[dnf] [dim]Using cached: {filename}[/dim]")
                                     shutil.copy2(str(cached_file), str(temp_dl_dir / filename))
                                     cached_count += 1
                                 else:
                                     if ctx.verbose:
-                                        print(
-                                            f"    [dnf] [yellow]Removing invalid/corrupted cache entry: {filename}[/yellow]"
+                                        rprint(
+                                            rf"    \[dnf] [yellow]Removing invalid/corrupted cache entry: {filename}[/yellow]"
                                         )
                                     cached_file.unlink(missing_ok=True)
                     if ctx.verbose and cached_count > 0:
@@ -435,7 +440,9 @@ class DnfPlugin(OfflinePlugin):
                         tmp_cache.rename(cache_target)
                     except Exception as exc:
                         if ctx.verbose:
-                            print(f"    [dnf] [dim]Warning: Could not cache {f.name}: {exc}[/dim]")
+                            rprint(
+                                rf"    \[dnf] [dim]Warning: Could not cache {f.name}: {exc}[/dim]"
+                            )
 
                 shutil.copy2(f, rpm_dir / f.name)
 

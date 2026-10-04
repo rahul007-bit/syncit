@@ -24,6 +24,40 @@ from syncit.plugins.registry import registry
 err_console = Console(stderr=True)
 
 
+# Host locations holding Red Hat subscription data. `dnf --installroot` reads
+# repo definitions (/etc/yum.repos.d) and the RHSM consumer identity from inside
+# the root, so an externally-populated base root needs these copied in to use the
+# build host's subscription (RHEL BaseOS/AppStream/CRB via cdn.redhat.com).
+SUBSCRIPTION_DIRS = (
+    "/etc/pki/entitlement",
+    "/etc/rhsm",
+    "/etc/yum.repos.d",
+    "/etc/pki/rpm-gpg",
+)
+
+
+def sync_subscription_to_installroot(installroot: Path | str, verbose: bool = False) -> None:
+    """Copy the host's RHEL subscription data into a base installroot.
+
+    Lets `dnf --installroot` resolve against entitled RHEL repos using the build
+    host's credentials instead of failing with 'not registered with an
+    entitlement server'. Missing host paths are ignored; errors are non-fatal.
+    """
+    root = Path(installroot).expanduser().resolve()
+    try:
+        for pki_dir in SUBSCRIPTION_DIRS:
+            host_path = Path(pki_dir)
+            if host_path.exists() and host_path.is_dir():
+                ir_path = root / pki_dir.lstrip("/")
+                ir_path.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(str(host_path), str(ir_path), dirs_exist_ok=True)
+    except Exception as e:
+        if verbose:
+            print(
+                f"    [dnf] [dim]Note: Could not copy some host entitlements to installroot: {e}[/dim]"
+            )
+
+
 def _run_cmd(cmd: list[str], verbose: bool = False) -> subprocess.CompletedProcess:
     if verbose:
         print(f"    [dnf] Executing: {' '.join(cmd)}")
@@ -269,24 +303,8 @@ class DnfPlugin(OfflinePlugin):
                 if ctx.verbose:
                     print(f"[dnf] Resolving deps against installroot: {installroot_path}")
 
-                # RHEL Subscription management fix: copy host entitlements & GPG keys to installroot
-                try:
-                    for pki_dir in [
-                        "/etc/pki/entitlement",
-                        "/etc/rhsm",
-                        "/etc/yum.repos.d",
-                        "/etc/pki/rpm-gpg",
-                    ]:
-                        host_path = Path(pki_dir)
-                        if host_path.exists() and host_path.is_dir():
-                            ir_path = installroot_path / pki_dir.lstrip("/")
-                            ir_path.mkdir(parents=True, exist_ok=True)
-                            shutil.copytree(str(host_path), str(ir_path), dirs_exist_ok=True)
-                except Exception as e:
-                    if ctx.verbose:
-                        print(
-                            f"    [dnf] [dim]Note: Could not copy some host entitlements to installroot: {e}[/dim]"
-                        )
+                # Use the build host's RHEL subscription inside the base root
+                sync_subscription_to_installroot(installroot_path, verbose=ctx.verbose)
             else:
                 if ctx.verbose:
                     print(

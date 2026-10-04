@@ -686,7 +686,7 @@ def _prompt_upstream_repos(
             host_entries = (
                 host_repos.load_host_apt_repos()
                 if plugin == "apt"
-                else host_repos.load_host_repos()
+                else host_repos.load_host_repos(include_disabled=True)
             )
             entries = catalog_entries + host_entries
             if not entries:
@@ -703,7 +703,10 @@ def _prompt_upstream_repos(
                     "Select upstream repos (space to toggle, Enter to confirm; type to filter):",
                     choices=[
                         questionary.Choice(
-                            title=f"{e['label']:<24} {e['description']}",
+                            title=(
+                                f"{e['label']:<24} {e['description']}"
+                                + ("  [enable in bundle]" if e.get("disabled") else "")
+                            ),
                             value=("host:" + e["id"])
                             if e["label"].startswith("[host]")
                             else e["id"],

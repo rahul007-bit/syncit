@@ -32,8 +32,16 @@ def _is_enabled(data: configparser.SectionProxy) -> bool:
     return enabled not in ("0", "false", "no")
 
 
-def load_host_repos(repo_dir: Path | None = None) -> list[dict[str, Any]]:
-    """Parse all enabled repos from *.repo files into catalog-shaped entries."""
+def load_host_repos(
+    repo_dir: Path | None = None, include_disabled: bool = False
+) -> list[dict[str, Any]]:
+    """Parse repos from *.repo files into catalog-shaped entries.
+
+    When `include_disabled` is set, disabled sections are returned too (flagged
+    `disabled=True`). This surfaces opt-in repos such as RHEL's CodeReady Linux
+    Builder (CRB), which ships `enabled=0` but is required by many -devel
+    packages (e.g. perl(IPC::Run) for postgresql16-devel).
+    """
     d = repo_dir if repo_dir is not None else HOST_REPO_DIR
     if not d.is_dir():
         return []
@@ -52,7 +60,8 @@ def load_host_repos(repo_dir: Path | None = None) -> list[dict[str, Any]]:
             if any(section.endswith(sfx) for sfx in _SKIP_SUFFIXES):
                 continue
             data = parser[section]
-            if not _is_enabled(data):
+            enabled = _is_enabled(data)
+            if not enabled and not include_disabled:
                 continue
             baseurl = _first_line(data.get("baseurl"))
             mirror = _first_line(data.get("mirrorlist") or data.get("metalink"))
@@ -74,14 +83,18 @@ def load_host_repos(repo_dir: Path | None = None) -> list[dict[str, Any]]:
                 # mirrorlist URLs cannot be used as a dnf baseurl — surface
                 # them but flag the limitation
                 repo["_mirrorlist_only"] = True
+            desc = f"{data.get('name', section).strip()} (from {path.name})"
+            if not enabled:
+                desc += " — disabled on host"
             entries.append(
                 {
                     "id": section,
                     "label": f"[host] {section}",
-                    "description": f"{data.get('name', section).strip()} (from {path.name})",
+                    "description": desc,
                     "repo": repo,
                     "repo_overrides": {},
                     "vars": {},
+                    "disabled": not enabled,
                 }
             )
             seen.add(section)

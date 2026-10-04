@@ -40,6 +40,36 @@ def _abs_installroot(installroot: str | None) -> str | None:
     return str(Path(installroot).expanduser().resolve())
 
 
+_MISSING_PROVIDER_RE = re.compile(r"nothing provides (\S+) needed by (\S+)")
+
+
+def _missing_providers(*outputs: str) -> list[str]:
+    """Extract 'nothing provides X needed by Y' lines from dnf output.
+
+    `dnf repoquery --requires --resolve` exits 0 while silently dropping an
+    unsatisfiable requires, so we must scan the output to surface it.
+    """
+    seen: list[str] = []
+    for text in outputs:
+        for provides, consumer in _MISSING_PROVIDER_RE.findall(text or ""):
+            msg = f"{provides} (needed by {consumer})"
+            if msg not in seen:
+                seen.append(msg)
+    return seen
+
+
+def _report_missing_providers(providers: list[str]) -> None:
+    if not providers:
+        return
+    rprint("[yellow]Unresolved dependencies (not provided by the selected repos):[/yellow]")
+    for msg in providers:
+        rprint(f"[yellow]  {msg}[/yellow]")
+    rprint(
+        "[yellow]Add the repo that provides them (e.g. RHEL CRB / EPEL) via "
+        "'Add more upstream repos' and retry.[/yellow]"
+    )
+
+
 def repo_id(repo_name: str, prefix: str = "syncit") -> str:
     return prefix + "_" + re.sub(r"[^a-zA-Z0-9._-]", "_", repo_name)
 
@@ -270,6 +300,7 @@ def resolve_deps(
         cmd.extend(["--installroot", abs_root])
     cmd.extend(nevras)
     res = _run(cmd, timeout=900)
+    _report_missing_providers(_missing_providers(res.stdout, res.stderr))
     if res.returncode != 0:
         last = res.stderr.strip().splitlines()[-1] if res.stderr.strip() else "unknown error"
         rprint(f"[yellow]Dependency resolution failed: {last}[/yellow]")
@@ -444,6 +475,15 @@ def browse_dnf_packages(
         )
         return []
 
+    # Mirror pack()'s behavior: make the build host's RHEL subscription (entitlement
+    # certs, RHSM identity, repo definitions) visible inside the base root so
+    # entitled CDN repos resolve the same way here as at pack time.
+    installroot = _abs_installroot(installroot)
+    if installroot:
+        from syncit.plugins.dnf import sync_subscription_to_installroot
+
+        sync_subscription_to_installroot(installroot)
+
     sort_mode = "relevance"
 
     def _search_round() -> bool:
@@ -528,6 +568,7 @@ def browse_dnf_packages(
                 if error:
                     for line in error.splitlines():
                         rprint(f"[yellow]  {line}[/yellow]")
+                _report_missing_providers(_missing_providers(error or ""))
                 # Auto-recovery: parse "needed by X" and drop the offender.
                 culprits = [c for c in re.findall(r"needed by (\S+)", error or "") if c in pins]
                 if (

@@ -172,6 +172,13 @@ def _base_opts(cache_root: Path) -> list[str]:
     ]
 
 
+def _abs_installroot(installroot: str | None) -> str | None:
+    """Normalize a possibly-relative base_installroot to an absolute path."""
+    if not installroot:
+        return None
+    return str(Path(installroot).expanduser().resolve())
+
+
 def _status_opts(status_file: str) -> list[str]:
     """Resolve against a foreign dpkg status (base_installroot) instead of the host."""
     return [
@@ -211,6 +218,7 @@ def warm_apt_metadata(repos: list[dict], installroot: str | None = None) -> bool
         return False
     temp = _session_sources(repos)
     status = None
+    installroot = _abs_installroot(installroot)
     if installroot:
         sf = Path(installroot) / "var" / "lib" / "dpkg" / "status"
         if sf.is_file():
@@ -310,8 +318,9 @@ def resolve_download_set(
         *_base_opts(APT_CACHE_ROOT),
         *_source_opts(_session_sources([])),
     ]
-    if installroot:
-        sf = Path(installroot) / "var" / "lib" / "dpkg" / "status"
+    abs_root = _abs_installroot(installroot)
+    if abs_root:
+        sf = Path(abs_root) / "var" / "lib" / "dpkg" / "status"
         if sf.is_file():
             cmd.extend(_status_opts(str(sf)))
     cmd.extend(pins)

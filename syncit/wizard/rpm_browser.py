@@ -33,6 +33,13 @@ def _is_nevra(line: str) -> bool:
     return bool(NEVRA_RE.match(line))
 
 
+def _abs_installroot(installroot: str | None) -> str | None:
+    """dnf rejects relative --installroot paths ('given path ... is not absolute')."""
+    if not installroot:
+        return None
+    return str(Path(installroot).expanduser().resolve())
+
+
 def repo_id(repo_name: str, prefix: str = "syncit") -> str:
     return prefix + "_" + re.sub(r"[^a-zA-Z0-9._-]", "_", repo_name)
 
@@ -258,8 +265,9 @@ def resolve_deps(
         "--qf",
         "%{name}-%{evr}.%{arch}|%{size}",
     ]
-    if installroot:
-        cmd.extend(["--installroot", installroot])
+    abs_root = _abs_installroot(installroot)
+    if abs_root:
+        cmd.extend(["--installroot", abs_root])
     cmd.extend(nevras)
     res = _run(cmd, timeout=900)
     if res.returncode != 0:
@@ -331,8 +339,9 @@ def verify_install(
     ]
     if releasever:
         cmd.extend(["--releasever", releasever])
-    if installroot:
-        cmd.extend(["--installroot", installroot])
+    abs_root = _abs_installroot(installroot)
+    if abs_root:
+        cmd.extend(["--installroot", abs_root])
     cmd.extend(build_repo_opts(repos))
     cmd.extend(pkgs)
     res = _run(cmd, timeout=900)
@@ -375,8 +384,9 @@ def resolve_download_set(
     ]
     if releasever:
         cmd.extend(["--releasever", releasever])
-    if installroot:
-        cmd.extend(["--installroot", installroot])
+    abs_root = _abs_installroot(installroot)
+    if abs_root:
+        cmd.extend(["--installroot", abs_root])
     cmd.extend(pkgs)
     res = _run(cmd, timeout=900)
     if res.returncode != 0:
